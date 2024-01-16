@@ -36,11 +36,11 @@ impl PartitionTableEntry {
     }
 }
 
-pub(crate) fn get_partition(partitions_raw: &[u8], index: usize) -> PartitionTableEntry {
+pub(crate) fn get_partition(partition_table: &[u8], index: usize) -> PartitionTableEntry {
     const ENTRY_SIZE: usize = 16;
 
     let offset = index * ENTRY_SIZE;
-    let buffer = partitions_raw.get(offset..).unwrap_or_fail(b'c');
+    let buffer = partition_table.get(offset..).unwrap_or_fail(b'c');
 
     let bootable_raw = *buffer.first().unwrap_or_fail(b'd');
     let bootable = bootable_raw == 0x80;
