@@ -7,9 +7,20 @@ name = "MiniatureOs"
 version = "0.1.0"
 
 [[package]]
-name = "bootloader"
+name = "kernel"
 version = "0.1.0"
 
 [[package]]
-name = "kernel"
+name = "mbr"
+version = "0.1.0"
+dependencies = [
+ "util",
+]
+
+[[package]]
+name = "stage2"
+version = "0.1.0"
+
+[[package]]
+name = "util"
 version = "0.1.0"
