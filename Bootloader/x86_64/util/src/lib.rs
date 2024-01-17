@@ -32,7 +32,7 @@ pub fn print(s: &str) {
 }
 
 /// Write Teletype to Active Page
-fn print_char(c: u8) {
+pub fn print_char(c: u8) {
     unsafe {
         asm!("mov ah, 0x0E; xor bh, bh; int 0x10", in("al") c);
     }

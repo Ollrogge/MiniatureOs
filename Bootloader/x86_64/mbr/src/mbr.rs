@@ -4,6 +4,8 @@ use util::UnwrapOrFail;
 /// An entry in a partition table.
 ///
 /// Based on https://docs.rs/mbr-nostd
+///
+/// Don't need all entries therefore this is not an exact replica
 #[repr(C)]
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub(crate) struct PartitionTableEntry {

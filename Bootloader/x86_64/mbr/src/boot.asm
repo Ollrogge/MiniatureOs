@@ -40,10 +40,10 @@ check_int13h:
     int 0x13
 
     jc fail
-    pop al
+    pop ax
 
 rust:
-    push dl # drive number
+    push dx # drive number
     call first_stage
 
 
