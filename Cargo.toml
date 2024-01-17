@@ -5,7 +5,18 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[build-dependencies]
+anyhow="*"
+futures="*"
+
+[profile.release]
+panic = "abort"
+
+[profile.dev]
+panic = "abort"
+
 [dependencies]
+mbrman="*"
 
 [workspace]
 members = [
@@ -14,3 +25,18 @@ members = [
     "Bootloader/x86_64/stage2",
     "Bootloader/x86_64/util",
 ]
+
+[profile.mbr]
+inherits = "release"
+opt-level = "s"
+lto = true
+codegen-units = 1
+debug = false
+overflow-checks = false
+
+[profile.stage2]
+inherits = "release"
+opt-level = "s"
+codegen-units = 1
+debug = false
+overflow-checks = true
