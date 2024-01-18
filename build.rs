@@ -1,11 +1,16 @@
 use anyhow::{anyhow, Context, Result};
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::{
+    fs::{self, File},
+    io::{self, Seek, SeekFrom},
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 // A Path is immutable. The owned version of Path is PathBuf
 
+const SECTOR_SIZE: u32 = 512;
+
 fn convert_elf_to_bin(filename: &Path) -> Result<()> {
-    eprintln!("Path: {:?}", filename);
     let bin_name = filename.with_extension("bin");
     let mut command = Command::new("objcopy");
     command
@@ -22,11 +27,8 @@ fn convert_elf_to_bin(filename: &Path) -> Result<()> {
     }
 }
 
-fn build_mbr() -> Result<()> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("Bootloader")
-        .join("x86_64")
-        .join("mbr");
+fn build_mbr() -> Result<PathBuf> {
+    let path = Path::new("Bootloader/x86_64/mbr");
     let mut command = Command::new("cargo");
     command
         .arg("+nightly")
@@ -49,18 +51,14 @@ fn build_mbr() -> Result<()> {
         return Err(anyhow!("failed to run install on mbr"));
     }
 
-    let elf_file = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/x86-mbr/mbr/mbr");
-
+    let elf_file = Path::new("target/x86-mbr/mbr/mbr");
     convert_elf_to_bin(&elf_file)?;
 
-    Ok(())
+    Ok(elf_file.with_extension("bin"))
 }
 
-fn build_stage2() -> Result<()> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("Bootloader")
-        .join("x86_64")
-        .join("stage2");
+fn build_stage2() -> Result<PathBuf> {
+    let path = Path::new("Bootloader/x86_64/stage2");
     let mut command = Command::new("cargo");
     command
         .arg("+nightly")
@@ -83,9 +81,54 @@ fn build_stage2() -> Result<()> {
         return Err(anyhow!("failed to run install on mbr"));
     }
 
-    let elf_file = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/x86-stage2/stage2/stage2");
-
+    let elf_file = Path::new("target/x86-stage2/stage2/stage2");
     convert_elf_to_bin(&elf_file)?;
+
+    Ok(elf_file.with_extension("bin"))
+}
+
+fn create_mbr_disk(mbr_path: &Path, second_stage_path: &Path, out_path: &Path) -> Result<()> {
+    let mut mbr_file = File::open(&mbr_path).context("Failed to open mbr bin file")?;
+
+    let mut mbr =
+        mbrman::MBR::read_from(&mut mbr_file, SECTOR_SIZE).context("Failed to read mbr")?;
+
+    let mut second_stage =
+        File::open(&second_stage_path).context("Failed to open second stage file")?;
+
+    let second_stage_len = second_stage
+        .metadata()
+        .and_then(|m| Ok(m.len()))
+        .context("Unable to obtain file size")?;
+
+    mbr[1] = mbrman::MBRPartitionEntry {
+        boot: mbrman::BOOT_ACTIVE,
+        starting_lba: 1,
+        sectors: ((second_stage_len + (SECTOR_SIZE - 1) as u64) / SECTOR_SIZE as u64) as u32,
+        // no idea
+        sys: 0x20,
+        first_chs: mbrman::CHS::empty(),
+        last_chs: mbrman::CHS::empty(),
+    };
+
+    let mut disk = fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .read(true)
+        .write(true)
+        .open(out_path)
+        .context("Failed to create MBR disk")?;
+
+    mbr.write_into(&mut disk)
+        .context("Writing to mbr disk failed")?;
+
+    assert_eq!(
+        disk.stream_position()
+            .context("failed to get disk image seek position")?,
+        u64::from(SECTOR_SIZE)
+    );
+    io::copy(&mut second_stage, &mut disk)
+        .context("failed to copy second stage binary to MBR disk image")?;
 
     Ok(())
 }
@@ -99,8 +142,11 @@ fn bios_main() {
 
     eprintln!("Out dir: {:?}", out_dir);
 
-    build_mbr().unwrap();
-    build_stage2().unwrap();
+    let mbr_path = build_mbr().unwrap();
+    let stage2_path = build_stage2().unwrap();
+    let disk_path = Path::new("disk_image.img");
+
+    create_mbr_disk(&mbr_path, &stage2_path, &disk_path).unwrap();
 
     // Run the bios build commands concurrently.
     // (Cargo already uses multiple threads for building dependencies, but these

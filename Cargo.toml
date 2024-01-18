@@ -8,6 +8,7 @@ edition = "2021"
 [build-dependencies]
 anyhow="*"
 futures="*"
+mbrman="*"
 
 [profile.release]
 panic = "abort"
@@ -16,7 +17,6 @@ panic = "abort"
 panic = "abort"
 
 [dependencies]
-mbrman="*"
 
 [workspace]
 members = [

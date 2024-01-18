@@ -10,7 +10,7 @@ pub extern "C" fn _start(disk_number: u8, partition_table_start: *const u8) -> !
 }
 
 fn start(disk_number: u8, partition_table_start: *const u8) -> ! {
-    print("Stage2");
+    print("\rStage2\n");
 
     loop {}
 }
