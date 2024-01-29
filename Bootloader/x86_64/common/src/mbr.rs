@@ -1,25 +1,22 @@
-use core::mem::size_of;
-use util::UnwrapOrFail;
-
+use crate::UnwrapOrFail;
 /// An entry in a partition table.
 ///
 /// Based on https://docs.rs/mbr-nostd
 ///
 /// Don't need all entries therefore this is not an exact replica
-#[repr(C)]
 #[derive(Copy, Clone, Eq, PartialEq)]
-pub(crate) struct PartitionTableEntry {
+pub struct PartitionTableEntry {
     /// Whether this partition is a boot partition.
-    pub(crate) bootable: bool,
+    pub bootable: bool,
 
     /// The type of partition in this entry.
-    pub(crate) partition_type: u8,
+    pub partition_type: u8,
 
     /// The index of the first block of this entry.
-    pub(crate) logical_block_address: u32,
+    pub logical_block_address: u32,
 
     /// The total number of blocks in this entry.
-    pub(crate) sector_count: u32,
+    pub sector_count: u32,
 }
 
 impl PartitionTableEntry {
@@ -38,7 +35,7 @@ impl PartitionTableEntry {
     }
 }
 
-pub(crate) fn get_partition(partition_table: &[u8], index: usize) -> PartitionTableEntry {
+pub fn get_partition(partition_table: &[u8], index: usize) -> PartitionTableEntry {
     const ENTRY_SIZE: usize = 16;
 
     let offset = index * ENTRY_SIZE;

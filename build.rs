@@ -104,6 +104,7 @@ fn create_mbr_disk(mbr_path: &Path, second_stage_path: &Path, out_path: &Path) -
     mbr[1] = mbrman::MBRPartitionEntry {
         boot: mbrman::BOOT_ACTIVE,
         starting_lba: 1,
+        // make sure we round up
         sectors: ((second_stage_len + (SECTOR_SIZE - 1) as u64) / SECTOR_SIZE as u64) as u32,
         // no idea
         sys: 0x20,
