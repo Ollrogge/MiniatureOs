@@ -1,10 +1,10 @@
-use crate::UnwrapOrFail;
+use crate::util::UnwrapOrFail;
 /// An entry in a partition table.
 ///
 /// Based on https://docs.rs/mbr-nostd
 ///
 /// Don't need all entries therefore this is not an exact replica
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Default)]
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub struct PartitionTableEntry {
     /// Whether this partition is a boot partition.
     pub bootable: bool,

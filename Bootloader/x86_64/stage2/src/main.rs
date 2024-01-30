@@ -1,12 +1,18 @@
 #![no_std]
 #![no_main]
-use common::mbr;
-use core::{arch::asm, slice};
+use common::mbr::{get_partition, PartitionTableEntry};
+use common::{disk, fat};
+use common::{hlt, println};
+use core::any::Any;
+use core::{arch::asm, panic::PanicInfo, slice};
 use lazy_static::lazy_static;
+
+// 1 MiB
+const STAGE3_DST: *mut u8 = 0x0010_0000 as *mut u8;
 
 use common::{
     gdt::{GlobalDescriptorTable, SegmentDescriptor},
-    panic, print,
+    print,
 };
 
 lazy_static! {
@@ -16,6 +22,14 @@ lazy_static! {
         gdt.add_entry(SegmentDescriptor::protected_mode_data_segment());
         gdt
     };
+}
+
+#[panic_handler]
+pub fn panic(info: &PanicInfo) -> ! {
+    println!("{}", info);
+    loop {
+        hlt();
+    }
 }
 
 fn enter_unreal_mode() {
@@ -39,9 +53,27 @@ pub extern "C" fn _start(disk_number: u8, partition_table_start: *const u8) -> !
 fn start(disk_number: u8, partition_table_start: *const u8) -> ! {
     enter_unreal_mode();
 
-    print("\rStage2 \n");
+    println!("Stage2 \r\n");
 
-    let partition_table = unsafe { slice::from_raw_parts(partition_table_start, 4 * 16) };
+    let partition_table_raw = unsafe { slice::from_raw_parts(partition_table_start, 4 * 16) };
 
-    loop {}
+    let mut partition_table: [PartitionTableEntry; 4] = [PartitionTableEntry::default(); 4];
+
+    for i in 0..4 {
+        partition_table[i] = get_partition(partition_table_raw, i);
+    }
+
+    let fat_partition = partition_table.get(1).unwrap();
+    // FAT32 with LBA
+    assert!(fat_partition.partition_type == 0xc);
+
+    let mut test = disk::DiskAccess::new(disk_number, fat_partition.logical_block_address, 0);
+
+    let bpb = fat::Bpb::parse(&mut test);
+
+    println!("Bpb output: {:?} \n", bpb);
+
+    loop {
+        hlt();
+    }
 }

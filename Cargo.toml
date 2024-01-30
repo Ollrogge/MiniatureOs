@@ -9,6 +9,8 @@ edition = "2021"
 anyhow="*"
 futures="*"
 mbrman="*"
+tempfile="*"
+fatfs="*"
 
 [profile.release]
 panic = "abort"
@@ -23,7 +25,7 @@ members = [
     "Kernel",
     "Bootloader/x86_64/mbr",
     "Bootloader/x86_64/stage2",
-    "Bootloader/x86_64/common",
+    "Bootloader/x86_64/common", "Bootloader/x86_64/stage3",
 ]
 
 [profile.mbr]
@@ -39,4 +41,9 @@ inherits = "release"
 opt-level = "s"
 codegen-units = 1
 debug = false
+overflow-checks = true
+
+[profile.stage3]
+inherits = "release"
+debug = true
 overflow-checks = true

@@ -1,8 +1,13 @@
 #![no_std]
 #![no_main]
 
-use common::{dap::DiskAddressPacket, fail, mbr::get_partition, print_char};
 use core::{arch::global_asm, slice, usize};
+
+mod dap;
+mod mbr;
+mod util;
+
+use util::{fail, print};
 
 global_asm!(include_str!("boot.asm"));
 
@@ -20,19 +25,12 @@ fn second_stage_start() -> u32 {
     ptr as u32
 }
 
-// local def because print in util is too big (overflows mbr code sec)
-fn print(s: &[u8]) {
-    for &c in s.iter() {
-        print_char(c);
-    }
-}
-
 #[no_mangle]
 pub extern "C" fn first_stage(disk_number: u8) {
     print(b"Stage1\n\r\0");
 
     let partition_table = unsafe { slice::from_raw_parts(partition_table_raw(), 4 * 16) };
-    let pte = get_partition(partition_table, 0);
+    let pte = mbr::get_partition(partition_table, 0);
 
     const SECTOR_SIZE: usize = 512;
 
@@ -42,7 +40,7 @@ pub extern "C" fn first_stage(disk_number: u8) {
 
     while sector_count > 0 {
         let sectors = u32::min(sector_count, 0x20) as u16;
-        let packet = DiskAddressPacket::new(buffer_address, sectors, start_lba);
+        let packet = dap::DiskAddressPacket::new(buffer_address, sectors, start_lba);
 
         unsafe {
             packet.load(disk_number);
@@ -60,6 +58,5 @@ pub extern "C" fn first_stage(disk_number: u8) {
 
     second_stage_entry(disk_number, partition_table);
 
-    print(b"Failed to start stage2\n\r\0");
     fail(b'F');
 }
