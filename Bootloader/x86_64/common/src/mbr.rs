@@ -1,4 +1,3 @@
-use crate::UnwrapOrFail;
 /// An entry in a partition table.
 ///
 /// Based on https://docs.rs/mbr-nostd
@@ -39,26 +38,26 @@ pub fn get_partition(partition_table: &[u8], index: usize) -> PartitionTableEntr
     const ENTRY_SIZE: usize = 16;
 
     let offset = index * ENTRY_SIZE;
-    let buffer = partition_table.get(offset..).unwrap_or_fail(b'c');
+    let buffer = partition_table.get(offset..).unwrap();
 
-    let bootable_raw = *buffer.first().unwrap_or_fail(b'd');
+    let bootable_raw = *buffer.first().unwrap();
     let bootable = bootable_raw == 0x80;
 
-    let partition_type = *buffer.get(4).unwrap_or_fail(b'e');
+    let partition_type = *buffer.get(4).unwrap();
 
     let lba = u32::from_le_bytes(
         buffer
             .get(8..)
             .and_then(|s| s.get(..4))
             .and_then(|s| s.try_into().ok())
-            .unwrap_or_fail(b'e'),
+            .unwrap(),
     );
     let len = u32::from_le_bytes(
         buffer
             .get(12..)
             .and_then(|s| s.get(..4))
             .and_then(|s| s.try_into().ok())
-            .unwrap_or_fail(b'f'),
+            .unwrap(),
     );
     PartitionTableEntry::new(bootable, partition_type, lba, len)
 }

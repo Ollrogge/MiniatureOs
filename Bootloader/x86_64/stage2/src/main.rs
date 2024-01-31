@@ -4,7 +4,7 @@ use common::mbr::{get_partition, PartitionTableEntry};
 use common::{disk, fat};
 use common::{hlt, println};
 use core::any::Any;
-use core::{arch::asm, panic::PanicInfo, slice};
+use core::{arch::asm, slice};
 use lazy_static::lazy_static;
 
 // 1 MiB
@@ -22,14 +22,6 @@ lazy_static! {
         gdt.add_entry(SegmentDescriptor::protected_mode_data_segment());
         gdt
     };
-}
-
-#[panic_handler]
-pub fn panic(info: &PanicInfo) -> ! {
-    println!("{}", info);
-    loop {
-        hlt();
-    }
 }
 
 fn enter_unreal_mode() {
@@ -67,11 +59,31 @@ fn start(disk_number: u8, partition_table_start: *const u8) -> ! {
     // FAT32 with LBA
     assert!(fat_partition.partition_type == 0xc);
 
-    let mut test = disk::DiskAccess::new(disk_number, fat_partition.logical_block_address, 0);
+    let mut disk = disk::DiskAccess::new(
+        disk_number,
+        u64::from(fat_partition.logical_block_address),
+        0,
+    );
 
-    let bpb = fat::Bpb::parse(&mut test);
+    let mut fs = fat::FileSystem::parse(disk);
+    // todo: somehow not hardcode this ?
+    let mut buffer = [0u8; 512 * 32];
 
-    println!("Bpb output: {:?} \n", bpb);
+    // LongNameEntry used even if name is just "stage3", entry afterwards is then
+    // of type UNUSED
+    for e in fs.read_root_dir(&mut buffer).filter_map(|e| e.ok()) {
+        match e {
+            fat::DirEntry::NormalDirEntry(e) => {
+                println!("NormalEntry name: {}", e.filename)
+            }
+            fat::DirEntry::LongNameDirEntry(e) => {
+                print!("\rLongNameEntry name: ");
+                e.print_name();
+                print!("\n");
+                println!("Order: {} \n", e.order);
+            }
+        }
+    }
 
     loop {
         hlt();

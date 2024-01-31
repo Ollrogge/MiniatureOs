@@ -8,13 +8,13 @@ pub struct DiskAddressPacket {
     sector_count: u16,
     offset: u16,
     segment: u16,
-    start_lba: u32,
+    start_lba: u64,
 }
 
 impl DiskAddressPacket {
     // real mode memory addressing: PhysicalAddress = segment * 16 + offset
     // so: offset = last 4 bits, segment = address >> 4
-    pub fn new(buffer_address: u32, sector_count: u16, start_lba: u32) -> Self {
+    pub fn new(buffer_address: u32, sector_count: u16, start_lba: u64) -> Self {
         Self {
             size: 0x10,
             zero: 0,

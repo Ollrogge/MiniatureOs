@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 use core::arch::asm;
+use core::panic::PanicInfo;
 
 pub mod dap;
 pub mod disk;
@@ -15,38 +16,15 @@ pub fn hlt() {
     }
 }
 
-#[no_mangle]
-pub extern "C" fn fail(code: u8) -> ! {
-    println!("Failed with code: {:x}", code);
+#[panic_handler]
+pub fn panic(info: &PanicInfo) -> ! {
+    println!("{}", info);
     loop {
         hlt();
     }
 }
 
-pub trait UnwrapOrFail {
-    type Out;
-
-    fn unwrap_or_fail(self, code: u8) -> Self::Out;
-}
-
-impl<T> UnwrapOrFail for Option<T> {
-    type Out = T;
-
-    fn unwrap_or_fail(self, code: u8) -> Self::Out {
-        match self {
-            Some(v) => v,
-            None => fail(code),
-        }
-    }
-}
-
-impl<T, E> UnwrapOrFail for Result<T, E> {
-    type Out = T;
-
-    fn unwrap_or_fail(self, code: u8) -> Self::Out {
-        match self {
-            Ok(v) => v,
-            Err(_) => fail(code),
-        }
-    }
+#[no_mangle]
+pub extern "C" fn fail(code: u8) -> ! {
+    panic!("Fail called with code: {:x}", code);
 }
