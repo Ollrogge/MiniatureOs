@@ -24,6 +24,7 @@ pub struct Bpb {
     root_cluster: u32,
 }
 
+#[derive(PartialEq)]
 enum FatType {
     Fat12,
     Fat16,
@@ -49,8 +50,6 @@ impl Bpb {
 
         let root_cluster;
         let fat32_size;
-
-        println!("Total sectors: {}, {}", total_sectors_16, total_sectors_32);
 
         // FAT12 or FAT16
         if total_sectors_16 != 0 && total_sectors_32 == 0 {
@@ -79,10 +78,12 @@ impl Bpb {
         }
     }
 
+    fn root_dir_sectors(&self) -> u32 {
+        ((self.root_entry_count as u32 * 32) + (self.bytes_per_sector as u32 - 1))
+            / self.bytes_per_sector as u32
+    }
+
     fn count_of_clusters(&self) -> u32 {
-        let root_dir_sectors = ((self.root_entry_count as u32 * 32)
-            + (self.bytes_per_sector as u32 - 1))
-            / self.bytes_per_sector as u32;
         let total_sectors = if self.total_sectors_16 != 0 {
             self.total_sectors_16 as u32
         } else {
@@ -91,7 +92,7 @@ impl Bpb {
         let data_sectors = total_sectors
             - (self.reserved_sector_count as u32
                 + (self.fat_count as u32 * self.fat_size())
-                + root_dir_sectors);
+                + self.root_dir_sectors());
         data_sectors / self.sectors_per_cluster as u32
     }
 
@@ -114,6 +115,51 @@ impl Bpb {
             FatType::Fat32
         }
     }
+
+    fn first_data_sector(&self) -> u32 {
+        self.reserved_sector_count as u32
+            + (self.fat_count as u32 * self.fat_size())
+            + self.root_dir_sectors()
+    }
+
+    fn first_root_dir_sector(&self) -> u32 {
+        self.first_data_sector() - self.root_dir_sectors()
+    }
+
+    fn root_dir_size(&self) -> u16 {
+        let size = self.root_entry_count * 32;
+
+        // 16384
+        assert!(size == 512 * 32);
+
+        size
+    }
+}
+
+enum FileAttributes {
+    ReadOnly = 0x1,
+    Hidden = 0x2,
+    System = 0x4,
+    VolumeId = 0x8,
+    Directory = 0x10,
+    Archive = 0x20,
+}
+
+enum DirEntry {
+    NormalDirEntry,
+    LongNameDirEntry,
+}
+
+// inlcudes only fields needed for loading next stages
+struct NormalDirEntry {
+    filename: [char; 11],
+    attributes: u8,
+    first_cluster: u32,
+    size: u32,
+}
+
+struct LongNameDirEntry {
+    order: u8,
 }
 
 pub struct FileSystem<D> {
@@ -127,5 +173,18 @@ impl<D: Read + Seek> FileSystem<D> {
             disk,
             bpb: Bpb::parse(&mut disk),
         }
+    }
+
+    fn read_root_dir(&mut self, buffer: &[u8]) {
+        if self.bpb.fat_type() == FatType::Fat32 {
+            unimplemented!();
+        }
+
+        assert!(buffer.len() == self.bpb.root_dir_size() as usize);
+
+        self.disk
+            .seek(SeekFrom::Start((self.bpb.first_root_dir_sector())));
+
+        let first_sector = self.bpb.first_root_dir_sector();
     }
 }

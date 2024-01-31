@@ -34,7 +34,7 @@ pub extern "C" fn first_stage(disk_number: u8) {
 
     const SECTOR_SIZE: usize = 512;
 
-    let mut start_lba: u64 = pte.logical_block_address.into();
+    let mut start_lba = pte.logical_block_address;
     let mut sector_count = pte.sector_count;
     let mut buffer_address = second_stage_start();
 
@@ -47,7 +47,7 @@ pub extern "C" fn first_stage(disk_number: u8) {
         }
 
         sector_count -= u32::from(sectors);
-        start_lba += u64::from(sectors);
+        start_lba += u32::from(sectors);
         buffer_address += u32::from(sectors) * SECTOR_SIZE as u32;
     }
 
