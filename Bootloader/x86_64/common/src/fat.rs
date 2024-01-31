@@ -1,7 +1,7 @@
 use crate::{print, println};
-use core::{char::DecodeUtf16Error, convert::TryFrom, slice, str};
+use core::{char::DecodeUtf16Error, convert::TryFrom, default::Default, slice, str};
 
-fn copy_bytes(dst: &mut [u8], src: & [u8]) {
+fn copy_bytes(dst: &mut [u8], src: &[u8]) {
     assert!(src.len() <= dst.len());
     let min_len = src.len().min(dst.len());
     for i in 0..min_len {
@@ -148,35 +148,44 @@ impl Bpb {
 }
 
 #[derive(PartialEq, Default, Clone)]
-#[repr(u8)]
-enum FileAttribute {
-    #[default]
-    None,
-    ReadOnly = 0x1,
-    Hidden = 0x2,
-    System = 0x4,
-    VolumeId = 0x8,
-    Directory = 0x10,
-    Archive = 0x20,
-    LongFileName = FileAttribute::ReadOnly as u8
-        | FileAttribute::Hidden as u8
-        | FileAttribute::System as u8
-        | FileAttribute::VolumeId as u8,
+struct FileAttributes(u8);
+
+impl FileAttributes {
+    const NONE: u8 = 0;
+    const READ_ONLY: u8 = 0x1;
+    const HIDDEN: u8 = 0x2;
+    const SYSTEM: u8 = 0x4;
+    const VOLUME_ID: u8 = 0x8;
+    const DIRECTORY: u8 = 0x10;
+    const ARCHIVE: u8 = 0x20;
+    const LONG_FILE_NAME: u8 = Self::READ_ONLY | Self::HIDDEN | Self::SYSTEM | Self::VOLUME_ID;
+
+    fn new() -> Self {
+        FileAttributes(Self::NONE)
+    }
+
+    fn set(&mut self, flag: u8) {
+        self.0 |= flag;
+    }
+
+    fn unset(&mut self, flag: u8) {
+        self.0 &= !flag;
+    }
+
+    fn is_set(&self, flag: u8) -> bool {
+        (self.0 & flag) != 0
+    }
 }
 
-impl TryFrom<u8> for FileAttribute {
-    type Error = ();
-    fn try_from(b: u8) -> Result<Self, Self::Error> {
-        match b {
-            x if x == FileAttribute::ReadOnly as u8 => Ok(FileAttribute::ReadOnly),
-            x if x == FileAttribute::Hidden as u8 => Ok(FileAttribute::Hidden),
-            x if x == FileAttribute::System as u8 => Ok(FileAttribute::System),
-            x if x == FileAttribute::VolumeId as u8 => Ok(FileAttribute::VolumeId),
-            x if x == FileAttribute::Directory as u8 => Ok(FileAttribute::Directory),
-            x if x == FileAttribute::Archive as u8 => Ok(FileAttribute::Archive),
-            x if x == FileAttribute::LongFileName as u8 => Ok(FileAttribute::LongFileName),
-            _ => Err(()),
-        }
+impl PartialEq<u8> for FileAttributes {
+    fn eq(&self, other: &u8) -> bool {
+        self.0 == *other
+    }
+}
+
+impl PartialEq<FileAttributes> for u8 {
+    fn eq(&self, other: &FileAttributes) -> bool {
+        *self == other.0
     }
 }
 
@@ -188,23 +197,67 @@ pub enum DirEntry {
 }
 
 impl DirEntry {
-    fn parse(raw: &[u8]) -> Result<DirEntry, Error> {
-        println!("Attributes: {:#x}", raw[11]);
-        let attributes: FileAttribute = raw[11].try_into()?;
+    const END_OF_DIRECTORY: u8 = 0x0;
+    const UNUSED_ENTRY: u8 = 0xe5;
+    const NORMAL_ENTRY_SIZE: usize = 0x20;
+    fn parse(raw: &[u8]) -> Result<(usize, DirEntry), Error> {
+        if raw[0] == Self::END_OF_DIRECTORY {
+            return Ok((Self::NORMAL_ENTRY_SIZE, DirEntry::EndOfDir));
+        } else if raw[0] == Self::UNUSED_ENTRY {
+            return Ok((Self::NORMAL_ENTRY_SIZE, DirEntry::Unused));
+        }
 
-        if attributes == FileAttribute::LongFileName {
-            let mut entry = LongNameDirEntry::default();
+        println!("Attributes: {:#x} ", raw[11]);
+        let attributes = FileAttributes(raw[11]);
 
-            entry.order = raw[0];
-            copy_bytes(&raw[])
-            entry.name1 = &raw[1..11];
-            entry.name2 = &raw[14..26];
-            entry.name3 = &raw[28..32];
+        if attributes == FileAttributes::LONG_FILE_NAME {
+            let mut long_name_entry = LongNameDirEntry::default();
+            let mut name_idx = 0x0;
+            let mut total_size = 0x0;
 
-            Ok(DirEntry::LongNameDirEntry(entry))
+            for (i, entry) in raw.chunks(0x20).enumerate() {
+                let attributes = FileAttributes(entry[11]);
+                if attributes == FileAttributes::LONG_FILE_NAME {
+                    let name1 = &entry[1..11];
+                    let name2 = &entry[14..26];
+                    let name3 = &entry[28..32];
+
+                    let iter = name1
+                        .chunks(2)
+                        .chain(name2.chunks(2))
+                        .chain(name3.chunks(2))
+                        .map(|c| u16::from_le_bytes(c.try_into().unwrap()))
+                        .take_while(|&c| c != 0);
+
+                    for c in char::decode_utf16(iter).filter_map(|c| c.ok()) {
+                        long_name_entry.filename[name_idx] = c;
+                        name_idx += 1;
+                    }
+                // Long file name entries always have a regular 8.3 entry to
+                // which they belong. The long file name entries are always
+                // placed immediately before their 8.3 entry.
+                } else {
+                    long_name_entry.first_cluster =
+                        u32::from(u16::from_le_bytes(entry[20..22].try_into().unwrap())) << 16
+                            | u32::from(u16::from_le_bytes(entry[26..28].try_into().unwrap()));
+
+                    long_name_entry.size = u32::from_le_bytes(entry[28..32].try_into().unwrap());
+
+                    long_name_entry.attributes = attributes;
+
+                    total_size = (i + 1) * Self::NORMAL_ENTRY_SIZE;
+                    break;
+                }
+            }
+
+            assert!(total_size != 0);
+
+            Ok((total_size, DirEntry::LongNameDirEntry(long_name_entry)))
         } else {
             let mut entry = NormalDirEntry::default();
-            copy_bytes(&mut entry.filename, &raw[0..11]);
+            for (i, &b) in raw[0..entry.filename.len()].iter().enumerate() {
+                entry.filename[i] = char::from(b);
+            }
             entry.attributes = attributes;
             entry.first_cluster = u32::from(u16::from_le_bytes(raw[20..22].try_into().unwrap()))
                 << 16
@@ -212,7 +265,39 @@ impl DirEntry {
 
             entry.size = u32::from_le_bytes(raw[28..32].try_into().unwrap());
 
-            Ok(DirEntry::NormalDirEntry(entry))
+            Ok((Self::NORMAL_ENTRY_SIZE, DirEntry::NormalDirEntry(entry)))
+        }
+    }
+
+    pub fn eq_name(&self, name: &str) -> bool {
+        match self {
+            DirEntry::NormalDirEntry(e) => e.filename.iter().cloned().eq(name.chars()),
+            DirEntry::LongNameDirEntry(e) => e.filename.iter().cloned().eq(name.chars()),
+            _ => false,
+        }
+    }
+
+    pub fn is_dir(&self) -> bool {
+        match self {
+            DirEntry::NormalDirEntry(e) => e.attributes.is_set(FileAttributes::DIRECTORY),
+            DirEntry::LongNameDirEntry(e) => e.attributes.is_set(FileAttributes::DIRECTORY),
+            _ => false,
+        }
+    }
+
+    pub fn first_cluster(&self) -> u32 {
+        match self {
+            DirEntry::NormalDirEntry(e) => e.first_cluster,
+            DirEntry::LongNameDirEntry(e) => e.first_cluster,
+            _ => 0,
+        }
+    }
+
+    pub fn file_size(&self) -> u32 {
+        match self {
+            DirEntry::NormalDirEntry(e) => e.size,
+            DirEntry::LongNameDirEntry(e) => e.size,
+            _ => 0,
         }
     }
 }
@@ -220,36 +305,49 @@ impl DirEntry {
 // inlcudes only fields needed for loading next stages
 #[derive(Default)]
 pub struct NormalDirEntry {
-    pub filename: [u8; 11],
-    attributes: FileAttribute,
-    first_cluster: u32,
+    filename: [char; 11],
+    attributes: FileAttributes,
+    pub first_cluster: u32,
     size: u32,
+}
+
+impl NormalDirEntry {
+    pub fn print_filename(&self) {
+        for c in self.filename.iter() {
+            print!("{}", c);
+        }
+        print!("\r\n");
+    }
 }
 
 // only when VFAT, completely stores the max 255 bytes long filename as a chain
 // the NormalDirEntry does **not** store the filename when VFAT is supported
 // only a fallback in cases VFAT isn't
-#[derive(Default)]
 pub struct LongNameDirEntry {
-    pub order: u8,
-    name: [u8; 255],
+    order: u8,
+    pub filename: [char; 255],
+    pub first_cluster: u32,
+    attributes: FileAttributes,
+    size: u32,
 }
 
-impl<'a> LongNameDirEntry {
-    pub fn name(&self) -> impl Iterator<Item = Result<char, DecodeUtf16Error>> + 'a {
-        let iter = self
-            .name1
-            .chunks(2)
-            .chain(self.name2.chunks(2))
-            .chain(self.name3.chunks(2))
-            .map(|c| u16::from_le_bytes(c.try_into().unwrap()))
-            .take_while(|&c| c != 0);
-        char::decode_utf16(iter)
+impl LongNameDirEntry {
+    pub fn print_filename(&self) {
+        for c in self.filename.iter() {
+            print!("{}", c);
+        }
+        print!("\r\n");
     }
+}
 
-    pub fn print_name(&self) {
-        for c in self.name().filter_map(|e| e.ok()) {
-            print!("{}", c)
+impl Default for LongNameDirEntry {
+    fn default() -> LongNameDirEntry {
+        LongNameDirEntry {
+            order: 0,
+            filename: [0 as char; 255],
+            attributes: FileAttributes::new(),
+            first_cluster: 0,
+            size: 0,
         }
     }
 }
@@ -257,6 +355,15 @@ impl<'a> LongNameDirEntry {
 struct File {
     start_sector: u32,
     cluster_count: u32,
+}
+
+impl File {
+    pub fn new(start_sector: u32, cluster_count: u32) -> File {
+        File {
+            start_sector,
+            cluster_count,
+        }
+    }
 }
 
 pub struct FileSystem<D> {
@@ -275,7 +382,7 @@ impl<D: Read + Seek> FileSystem<D> {
     pub fn read_root_dir<'a>(
         &mut self,
         buffer: &'a mut [u8],
-    ) -> impl Iterator<Item = Result<DirEntry, ()>> {
+    ) -> impl Iterator<Item = Result<DirEntry, ()>> + 'a {
         assert!(buffer.len() == self.bpb.root_dir_size() as usize);
 
         if self.bpb.fat_type() == FatType::Fat32 {
@@ -287,14 +394,21 @@ impl<D: Read + Seek> FileSystem<D> {
 
         self.disk.read_exact(buffer);
 
-        buffer
-            .chunks(0x20)
-            .take_while(|e| e[0] != Self::END_OF_DIRECTORY)
-            .filter(|e| e[0] != Self::UNUSED_ENTRY)
-            .map(DirEntry::parse)
+        RootDirIter::new(buffer)
     }
 
-    pub fn find_file_in_root_dir(name: &str) -> Option<File> {}
+    pub fn find_file_in_root_dir(&mut self, name: &str) -> Option<File> {
+        // todo: somehow not hardcode this ?
+        let mut buffer = [0u8; 512 * 32];
+        let mut entries = self.read_root_dir(&mut buffer).filter_map(|e| e.ok());
+        let entry = entries.find(|e| e.eq_name(name))?;
+
+        if entry.is_dir() {
+            None
+        } else {
+            Some(File::new(entry.first_cluster(), entry.file_size()))
+        }
+    }
 }
 
 struct RootDirIter<'a> {
@@ -304,20 +418,16 @@ struct RootDirIter<'a> {
 
 impl<'a> RootDirIter<'a> {
     pub fn new(buf: &'a [u8]) -> Self {
-        RootDirIter { buf, offset: 0}
+        RootDirIter { buf, offset: 0 }
     }
 
-    const END_OF_DIRECTORY: u8 = 0x0;
-    const UNUSED_ENTRY: u8 = 0xe5;
     pub fn next_entry(&mut self) -> Result<DirEntry, Error> {
-        match self.buf[self.offset] {
-            Self::END_OF_DIRECTORY => Ok(DirEntry::EndOfDir),
-            Self::UNUSED_ENTRY => Ok(DirEntry::Unused),
-            _ => {
-                let attributes: FileAttribute = self.buf[self.offset + 11].try_into()?;
-
-                Error
+        match DirEntry::parse(&self.buf[self.offset..]) {
+            Ok((size, entry)) => {
+                self.offset += size;
+                Ok(entry)
             }
+            Err(e) => Err(e),
         }
     }
 }
@@ -327,14 +437,12 @@ impl<'a> Iterator for RootDirIter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.next_entry() {
-            Ok(entry) => {
-                match entry {
-                    DirEntry::EndOfDir => None,
-                    DirEntry::Unused => self.next(),
-                    _ => Some(Ok(entry))
-                }
+            Ok(entry) => match entry {
+                DirEntry::EndOfDir => None,
+                DirEntry::Unused => self.next(),
+                _ => Some(Ok(entry)),
             },
-            Err(e) => Some(Err(e))
+            Err(e) => None,
         }
     }
 }

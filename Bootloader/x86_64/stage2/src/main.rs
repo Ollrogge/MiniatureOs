@@ -69,19 +69,17 @@ fn start(disk_number: u8, partition_table_start: *const u8) -> ! {
     // todo: somehow not hardcode this ?
     let mut buffer = [0u8; 512 * 32];
 
-    // LongNameEntry used even if name is just "stage3", entry afterwards is then
-    // of type UNUSED
     for e in fs.read_root_dir(&mut buffer).filter_map(|e| e.ok()) {
         match e {
             fat::DirEntry::NormalDirEntry(e) => {
-                println!("NormalEntry name: {}", e.filename)
+                e.print_filename();
+                println!("First cluster: {}", e.first_cluster);
             }
             fat::DirEntry::LongNameDirEntry(e) => {
-                print!("\rLongNameEntry name: ");
-                e.print_name();
-                print!("\n");
-                println!("Order: {} \n", e.order);
+                e.print_filename();
+                println!("First cluster: {} ", e.first_cluster);
             }
+            _ => (),
         }
     }
 
