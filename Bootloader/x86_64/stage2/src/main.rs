@@ -93,10 +93,10 @@ fn start(disk_number: u8, partition_table_start: *const u8) -> ! {
 
     print_memory_map(&memory_map);
 
-    let mut info_block = vesa::VbeInfoBlock::default();
+    let mut info_block = vesa::VesaInfo::default();
     info_block.query().expect("Querying info block failed");
 
-    println!("Info block: {:?}", info_block);
+    info_block.get_best_mode(1024, 768);
 
     loop {
         hlt();
