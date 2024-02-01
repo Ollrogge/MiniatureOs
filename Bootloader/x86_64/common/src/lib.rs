@@ -10,6 +10,14 @@ pub mod gdt;
 pub mod mbr;
 pub mod memory_map;
 pub mod print;
+pub mod vesa;
+
+#[macro_export]
+macro_rules! const_assert {
+    ($($tt:tt)*) => {
+        const _: () = assert!($($tt)*);
+    }
+}
 
 pub fn hlt() {
     unsafe {

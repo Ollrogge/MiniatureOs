@@ -207,7 +207,6 @@ impl DirEntry {
             return Ok((Self::NORMAL_ENTRY_SIZE, DirEntry::Unused));
         }
 
-        println!("Attributes: {:#x} ", raw[11]);
         let attributes = FileAttributes(raw[11]);
 
         if attributes == FileAttributes::LONG_FILE_NAME {

@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
-use common::{disk, fail, fat, hlt, mbr, memory_map, println};
+use common::memory_map::{E820MemoryRegion, MemoryMap};
+use common::{disk, fail, fat, hlt, mbr, memory_map, println, vesa};
 
 use core::any::Any;
 use core::{arch::asm, slice};
@@ -42,15 +43,15 @@ pub extern "C" fn _start(disk_number: u8, partition_table_start: *const u8) -> !
 }
 
 // Should look something like:
-// Memory region, start: 0x0, length: 0x9fc00, type: Normal, attributes: 0x0
-// Memory region, start: 0x9fc00, length: 0x400, type: Reserved, attributes: 0x0
-// Memory region, start: 0xf0000, length: 0x10000, type: Reserved, attributes: 0x0
-// Memory region, start: 0x100000, length: 0x7ee0000, type: Normal, attributes: 0x0
-// Memory region, start: 0x7fe0000, length: 0x20000, type: Reserved, attributes: 0x0
-// Memory region, start: 0xfffc0000, length: 0x40000, type: Reserved, attributes: 0x0
-// Memory region, start: 0xfd00000000, length: 0x300000000, type: Reserved, attributes: 0x0
-fn print_memory_map(map: &[memory_map::E820MemoryRegion]) {
-    for region in map {
+//  Memory region, start: 0x0, length: 0x9fc00, type: Normal, attributes: 0x0
+//  Memory region, start: 0x9fc00, length: 0x400, type: Reserved, attributes: 0x0
+//  Memory region, start: 0xf0000, length: 0x10000, type: Reserved, attributes: 0x0
+//  Memory region, start: 0x100000, length: 0x7ee0000, type: Normal, attributes: 0x0
+//  Memory region, start: 0x7fe0000, length: 0x20000, type: Reserved, attributes: 0x0
+//  Memory region, start: 0xfffc0000, length: 0x40000, type: Reserved, attributes: 0x0
+//  Memory region, start: 0xfd00000000, length: 0x300000000, type: Reserved, attributes: 0x0
+fn print_memory_map(map: &memory_map::MemoryMap) {
+    for region in map.iter() {
         println!(
             "Memory region, start: {:#x}, length: {:#x}, type: {:?}, attributes: {:#x} ",
             region.start, region.length, region.typ, region.acpi_extended_attributes
@@ -81,22 +82,21 @@ fn start(disk_number: u8, partition_table_start: *const u8) -> ! {
     );
 
     let mut fs = fat::FileSystem::parse(disk);
-    // todo: somehow not hardcode this ?
-    let mut buffer = [0u8; 512 * 32];
-
-    let stage3 = match fs.find_file_in_root_dir("stage3") {
-        Some(v) => v,
-        _ => panic!("Failed to find stage3"),
-    };
 
     fs.try_load_file("stage3", STAGE3_DST)
         .expect("Failed to load stage3");
 
     println!("Stage3 loaded at: {:#p}", STAGE3_DST);
 
-    let memory_map = memory_map::load_memory_map().expect("Failed to load memory map");
+    let mut memory_map = memory_map::MemoryMap::default();
+    memory_map.load().expect("Failed to load memory map");
 
-    print_memory_map(memory_map);
+    print_memory_map(&memory_map);
+
+    let mut info_block = vesa::VbeInfoBlock::default();
+    info_block.query().expect("Querying info block failed");
+
+    println!("Info block: {:?}", info_block);
 
     loop {
         hlt();
