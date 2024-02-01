@@ -22,7 +22,7 @@ pub struct DiskAccess {
     pub offset: u64,
 }
 
-const SECTOR_SIZE: u64 = 512;
+pub const SECTOR_SIZE: usize = 512;
 
 impl DiskAccess {
     pub fn new(disk_number: u8, base_lba: u64, offset: u64) -> DiskAccess {
@@ -56,7 +56,8 @@ impl Read for DiskAccess {
     fn read_exact(&mut self, buf: &mut [u8]) {
         // todo: read it based on SECTOR_SIZE stored in BPB ?
         let mut start_lba = self.base_lba + self.offset;
-        let mut sector_count = ((buf.len() as u64 + (SECTOR_SIZE - 1)) / SECTOR_SIZE) as u32;
+        let mut sector_count =
+            ((buf.len() as u64 + (SECTOR_SIZE as u64 - 1)) / SECTOR_SIZE as u64) as u32;
         let mut buffer_address = buf.as_ptr() as u32;
 
         while sector_count > 0 {

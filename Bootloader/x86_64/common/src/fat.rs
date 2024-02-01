@@ -1,5 +1,5 @@
-use crate::{print, println};
-use core::{char::DecodeUtf16Error, convert::TryFrom, default::Default, slice, str};
+use crate::{disk::SECTOR_SIZE, print, println};
+use core::{char::DecodeUtf16Error, convert::TryFrom, default::Default, ptr, slice, str};
 
 fn copy_bytes(dst: &mut [u8], src: &[u8]) {
     assert!(src.len() <= dst.len());
@@ -271,8 +271,18 @@ impl DirEntry {
 
     pub fn eq_name(&self, name: &str) -> bool {
         match self {
-            DirEntry::NormalDirEntry(e) => e.filename.iter().cloned().eq(name.chars()),
-            DirEntry::LongNameDirEntry(e) => e.filename.iter().cloned().eq(name.chars()),
+            DirEntry::NormalDirEntry(e) => e
+                .filename
+                .iter()
+                .cloned()
+                .take_while(|&c| c != '\0')
+                .eq(name.chars()),
+            DirEntry::LongNameDirEntry(e) => e
+                .filename
+                .iter()
+                .cloned()
+                .take_while(|&c| c != '\0')
+                .eq(name.chars()),
             _ => false,
         }
     }
@@ -308,6 +318,7 @@ pub struct NormalDirEntry {
     filename: [char; 11],
     attributes: FileAttributes,
     pub first_cluster: u32,
+    // in bytes
     size: u32,
 }
 
@@ -352,17 +363,14 @@ impl Default for LongNameDirEntry {
     }
 }
 
-struct File {
-    start_sector: u32,
-    cluster_count: u32,
+pub struct File {
+    pub start_sector: u32,
+    pub size: u32,
 }
 
 impl File {
-    pub fn new(start_sector: u32, cluster_count: u32) -> File {
-        File {
-            start_sector,
-            cluster_count,
-        }
+    pub fn new(start_sector: u32, size: u32) -> File {
+        File { start_sector, size }
     }
 }
 
@@ -399,6 +407,8 @@ impl<D: Read + Seek> FileSystem<D> {
 
     pub fn find_file_in_root_dir(&mut self, name: &str) -> Option<File> {
         // todo: somehow not hardcode this ?
+        // FAT16: common to have a root directory with max 512 entries of size 32
+        // If I had dynamic memory i could use bpb.root_entry_count
         let mut buffer = [0u8; 512 * 32];
         let mut entries = self.read_root_dir(&mut buffer).filter_map(|e| e.ok());
         let entry = entries.find(|e| e.eq_name(name))?;
@@ -408,6 +418,29 @@ impl<D: Read + Seek> FileSystem<D> {
         } else {
             Some(File::new(entry.first_cluster(), entry.file_size()))
         }
+    }
+
+    pub fn try_load_file(&mut self, name: &str, dest: *mut u8) -> Result<(), Error> {
+        let file = self.find_file_in_root_dir(name).ok_or(())?;
+        let mut buffer = [0u8; SECTOR_SIZE];
+        let mut sectors = file.size as usize / SECTOR_SIZE + 1;
+        self.disk
+            .seek(SeekFrom::Start(u64::from(file.start_sector)));
+
+        for i in 0..sectors {
+            self.disk.read_exact(&mut buffer);
+            let dest = dest.wrapping_add(i * SECTOR_SIZE);
+
+            unsafe {
+                ptr::copy_nonoverlapping(buffer.as_ptr(), dest, buffer.len());
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn disk(&mut self) -> &mut D {
+        &mut self.disk
     }
 }
 

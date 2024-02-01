@@ -8,6 +8,7 @@ pub mod disk;
 pub mod fat;
 pub mod gdt;
 pub mod mbr;
+pub mod memory_map;
 pub mod print;
 
 pub fn hlt() {
@@ -27,4 +28,14 @@ pub fn panic(info: &PanicInfo) -> ! {
 #[no_mangle]
 pub extern "C" fn fail(code: u8) -> ! {
     panic!("Fail called with code: {:x}", code);
+}
+
+pub struct Region {
+    start: u64,
+    len: u64,
+}
+
+#[repr(C)]
+pub struct BiosInfo {
+    kernel: Region,
 }
