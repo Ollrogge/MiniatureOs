@@ -1,5 +1,4 @@
-use crate::const_assert;
-use crate::println;
+use crate::{const_assert, println, BiosFramebufferInfo, PixelFormat, Region};
 use core::{arch::asm, default::Default, mem::size_of};
 
 #[derive(Debug, Clone, Copy)]
@@ -45,19 +44,20 @@ impl Default for VesaInfo {
 }
 
 impl VesaInfo {
-    pub fn query(&mut self) -> Result<(), u16> {
+    pub fn get() -> Result<Self, u16> {
+        let mut obj = Self::default();
         let mut ret = 0x0;
         unsafe {
-            asm!("int 0x10", inout("ax") 0x4f00u16 => ret, in("di") self, options(nostack, nomem));
+            asm!("push es", "int 0x10", "pop es", inout("ax") 0x4f00u16 => ret, in("di") &mut obj);
         }
 
         match ret {
-            0x004f => Ok(()),
+            0x004f => Ok(obj),
             _ => Err(ret),
         }
     }
 
-    fn get_mode(&mut self, offset: i32) -> Option<u16> {
+    fn get_mode(&self, offset: i32) -> Option<u16> {
         /*
                 error[E0793]: reference to packed field is unaligned
           --> Bootloader/x86_64/common/src/vesa.rs:61:38
@@ -84,21 +84,77 @@ impl VesaInfo {
         }
     }
 
-    pub fn get_best_mode(&mut self, max_width: u16, max_height: u16) {
+    pub fn get_best_mode(&self, width: u16, height: u16, depth: u8) -> u16 {
+        let mut best = 0x0;
+        let mut best_pix_diff = u32::MAX;
+        let mut best_depth_diff = u8::MAX;
         for i in 0.. {
             let mode = match self.get_mode(i) {
                 Some(mode) => mode,
                 None => break,
             };
 
-            println!("Mode: {:#x} ", mode);
+            let info = match VesaModeInfo::get(mode) {
+                Ok(info) => info,
+                Err(c) => {
+                    println!("VesaModeInfo query failed with code: {:x}", c);
+                    continue;
+                }
+            };
+
+            // Check if this is a graphics mode with linear frame buffer support
+            if info.attributes & 0x90 != 0x90 {
+                continue;
+            }
+
+            // Check if this is a packed pixel or direct color mode
+            if info.memory_model != 4 && info.memory_model != 6 {
+                continue;
+            }
+
+            if info.width == width && info.height == height && info.bits_per_pixel == depth {
+                return mode;
+            }
+
+            let pix_diff =
+                (info.width as u32 * info.height as u32).abs_diff(width as u32 * height as u32);
+            let depth_diff = info.bits_per_pixel.abs_diff(depth);
+            if best_pix_diff > pix_diff || best_pix_diff == pix_diff && best_depth_diff > depth_diff
+            {
+                best = mode;
+                best_depth_diff = depth_diff;
+                best_pix_diff = pix_diff;
+            }
+        }
+
+        best
+    }
+
+    pub fn set_mode(&self, mode: u16) -> Result<(), u16> {
+        let mut mode = mode;
+        // bit 14 is the LFB bit: when set, it enables the linear framebuffer,
+        //when clear, software must use bank switching
+        mode |= 1 << 14;
+
+        // Bit 15 is the DM bit: when set, the BIOS doesn't clear the screen.
+        // Bit 15 is usually ignored and should always be cleared.
+        mode &= !(1 << 15);
+
+        let mut ret: u16;
+        unsafe {
+            asm!("push es", "int 0x10", "pop es", inout("ax") 0x4f02u16 => ret, in("bx") mode, options(nomem));
+        }
+
+        match ret {
+            0x4f => Ok(()),
+            _ => Err(ret),
         }
     }
 }
 
 #[derive(Debug)]
 #[repr(C)]
-struct VesaModeInfo {
+pub struct VesaModeInfo {
     attributes: u16,
     window_a: u8,
     window_b: u8,
@@ -176,17 +232,47 @@ impl Default for VesaModeInfo {
 }
 
 impl VesaModeInfo {
-    pub fn query(&mut self, mode: u16) -> Result<(), u16> {
-        let ptr = RealModePtr(self as *mut VesaModeInfo as u32);
+    pub fn get(mode: u16) -> Result<Self, u16> {
+        let mut obj = Self::default();
+        let ptr = RealModePtr(&mut obj as *mut VesaModeInfo as u32);
         let mut ret: u16;
         unsafe {
-            asm!("mov es, {:x}", "int 0x10", in(reg) ptr.segment(), inout("ax") 0x4f01u16 => ret, in("cx") mode, in("di") ptr.offset(), options(nostack, nomem));
+            asm!("push es", "mov es, {:x}", "int 0x10", "pop es", in(reg) ptr.segment(), in("di") ptr.offset(), inout("ax") 0x4f01u16 => ret, in("cx") mode);
         }
 
-        if ret != 0x4f {
-            Err(ret)
-        } else {
-            Ok(())
+        match ret {
+            0x4f => Ok(obj),
+            _ => Err(ret),
         }
+    }
+
+    pub fn get_pixel_format(&self) -> PixelFormat {
+        match (self.red_position, self.green_position, self.blue_position) {
+            (0, 8, 16) => PixelFormat::Rgb,
+            (16, 8, 0) => PixelFormat::Bgr,
+            (red_position, green_position, blue_position) => PixelFormat::Unknown {
+                red_position,
+                green_position,
+                blue_position,
+            },
+        }
+    }
+
+    pub fn to_framebuffer_info(&self) -> BiosFramebufferInfo {
+        let bytes_per_pixel = self.bits_per_pixel / 8;
+        let region = Region::new(
+            self.framebuffer.into(),
+            u64::from(self.height) * u64::from(self.bytes_per_scanline),
+        );
+        let stride = self.bytes_per_scanline / u16::from(bytes_per_pixel);
+
+        BiosFramebufferInfo::new(
+            region,
+            self.width,
+            self.height,
+            bytes_per_pixel,
+            stride,
+            self.get_pixel_format(),
+        )
     }
 }

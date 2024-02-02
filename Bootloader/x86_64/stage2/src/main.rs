@@ -1,9 +1,12 @@
 #![no_std]
 #![no_main]
 use common::memory_map::{E820MemoryRegion, MemoryMap};
-use common::{disk, fail, fat, hlt, mbr, memory_map, println, vesa};
+use common::{
+    disk, fail, fat, hlt, mbr, memory_map, println, vesa, BiosFramebufferInfo, BiosInfo, Region,
+};
 
 use core::any::Any;
+use core::borrow::Borrow;
 use core::{arch::asm, slice};
 use lazy_static::lazy_static;
 
@@ -24,6 +27,20 @@ lazy_static! {
     };
 }
 
+fn set_protected_mode_bit() -> u32 {
+    let mut cr0: u32;
+    unsafe {
+        asm!("mov {:e}, cr0", out(reg) cr0, options(nomem, nostack, preserves_flags));
+    }
+    let cr0_protected = cr0 | 1;
+    write_cr0(cr0_protected);
+    cr0
+}
+
+fn write_cr0(val: u32) {
+    unsafe { asm!("mov cr0, {:e}", in(reg) val, options(nostack, preserves_flags)) };
+}
+
 fn enter_unreal_mode() {
     let ds: u16;
     let ss: u16;
@@ -34,6 +51,61 @@ fn enter_unreal_mode() {
     }
 
     GDT.clear_interrupts_and_load();
+
+    // set protected mode bit
+    let cr0 = set_protected_mode_bit();
+
+    // load GDT
+    // mov descriptor (0x10 / 2) = data segment descriptor to ds and ss
+    unsafe {
+        asm!("mov {0}, 0x10", "mov ds, {0}", "mov ss, {0}", out(reg) _);
+    }
+
+    // unset protected mode bit again
+    write_cr0(cr0);
+
+    unsafe {
+        asm!("mov ds, {0:x}", in(reg) ds, options(nostack, preserves_flags));
+        asm!("mov ss, {0:x}", in(reg) ss, options(nostack, preserves_flags));
+        asm!("sti");
+    }
+}
+
+fn enter_protected_mode_and_jump_to_stage3(entry_point: *const u8, info: &BiosInfo) {
+    unsafe {
+        // disable interrupts, set protection enabled bit in cr0
+        asm!("cli", "mov eax, cr0", " or al, 1", " mov cr0, eax");
+        asm!(
+            // align the stack
+            "and esp, 0xffffff00",
+            // push arguments
+            "push {info:e}",
+            // push entry point address
+            "push {entry_point:e}",
+            info = in(reg) info as *const _ as u32,
+            entry_point = in(reg) entry_point as u32,
+        );
+        asm!("ljmp $0x8, $2f", "2:", options(att_syntax));
+        asm!(
+            ".code32",
+
+            // reload segment registers
+            "mov {0}, 0x10",
+            "mov ds, {0}",
+            "mov es, {0}",
+            "mov ss, {0}",
+
+            // jump to third stage
+            "pop {1}",
+            "call {1}",
+
+            // enter endless loop in case third stage returns
+            "2:",
+            "jmp 2b",
+            out(reg) _,
+            out(reg) _,
+        );
+    }
 }
 
 #[no_mangle]
@@ -88,15 +160,19 @@ fn start(disk_number: u8, partition_table_start: *const u8) -> ! {
 
     println!("Stage3 loaded at: {:#p}", STAGE3_DST);
 
-    let mut memory_map = memory_map::MemoryMap::default();
-    memory_map.load().expect("Failed to load memory map");
-
+    let memory_map = memory_map::MemoryMap::get().expect("Failed to get memory map");
     print_memory_map(&memory_map);
 
-    let mut info_block = vesa::VesaInfo::default();
-    info_block.query().expect("Querying info block failed");
+    let vesa_info = vesa::VesaInfo::get().expect("Error getting Vesa info");
+    let mode = vesa_info.get_best_mode(1280, 1024, 24);
+    let mode_info = vesa::VesaModeInfo::get(mode).expect("Failed to get vesa mode info");
 
-    info_block.get_best_mode(1024, 768);
+    //vesa_info.set_mode(mode).expect("Failed to set vesa mode");
+
+    // todo: kernel info
+    let bios_info = BiosInfo::new(Region::new(0, 0), mode_info.to_framebuffer_info());
+
+    enter_protected_mode_and_jump_to_stage3(STAGE3_DST, &bios_info);
 
     loop {
         hlt();

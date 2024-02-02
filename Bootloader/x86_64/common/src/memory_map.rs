@@ -36,7 +36,8 @@ impl AsRef<[E820MemoryRegion]> for MemoryMap {
 
 // https://wiki.osdev.org/Detecting_Memory_(x86)#Getting_an_E820_Memory_Map (c code)
 impl MemoryMap {
-    pub fn load(&mut self) -> Result<(), ()> {
+    pub fn get() -> Result<MemoryMap, ()> {
+        let mut obj = Self::default();
         const MAGIC_NUMBER: u32 = 0x534D4150;
         let mut offset = 0x0;
         let mut signature = MAGIC_NUMBER;
@@ -52,8 +53,8 @@ impl MemoryMap {
                     inout("ecx") size_of::<E820MemoryRegion>() => len,
                     inout("ebx") offset,
                     in("edx") MAGIC_NUMBER,
-                    in("edi") &self.map[offset],
-                    options(nostack, nomem)
+                    in("edi") &obj.map[offset],
+                    options(nostack)
                 );
             }
 
@@ -61,7 +62,7 @@ impl MemoryMap {
                 return Err(());
             }
 
-            let entry = &self.map[entries];
+            let entry = &obj.map[entries];
 
             if len > 0x20 && (entry.acpi_extended_attributes & 0x1) == 0 {
                 continue;
@@ -74,9 +75,9 @@ impl MemoryMap {
             }
         }
 
-        self.size = entries;
+        obj.size = entries;
 
-        Ok(())
+        Ok(obj)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &E820MemoryRegion> {

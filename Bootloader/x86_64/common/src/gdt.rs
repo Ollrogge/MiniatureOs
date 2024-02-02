@@ -1,3 +1,4 @@
+use crate::println;
 use bit_field::BitField;
 use bitflags::bitflags;
 use core::arch::asm;
@@ -61,10 +62,11 @@ impl SegmentDescriptor {
             | SegmentDescriptorFlags::PROTECTED_MODE
             | SegmentDescriptorFlags::GRANULARITY;
 
-        SegmentDescriptor::new(flags, 0xFFFFF, 9)
+        SegmentDescriptor::new(flags, 0xFFFFF, 0)
     }
 }
 
+#[derive(Debug)]
 #[repr(C)]
 pub struct GlobalDescriptorTable {
     entries: [u64; 8],
@@ -104,7 +106,7 @@ impl GlobalDescriptorTable {
     }
 }
 
-#[repr(C)]
+#[repr(C, packed(2))]
 pub struct GlobalDescriptorTableDescriptor {
     size: u16,
     base: *const GlobalDescriptorTable,
@@ -113,7 +115,7 @@ pub struct GlobalDescriptorTableDescriptor {
 impl GlobalDescriptorTableDescriptor {
     pub fn new(table: &GlobalDescriptorTable) -> GlobalDescriptorTableDescriptor {
         GlobalDescriptorTableDescriptor {
-            size: table.size as u16,
+            size: (table.size * 8 - 1) as u16,
             base: table,
         }
     }
