@@ -55,10 +55,13 @@ impl Seek for DiskAccess {
 impl Read for DiskAccess {
     fn read_exact(&mut self, buf: &mut [u8]) {
         // todo: read it based on SECTOR_SIZE stored in BPB ?
+        // todo: make offset a byte offset instead of sector to enable bytewise access ?
         let mut start_lba = self.base_lba + self.offset;
         let mut sector_count =
             ((buf.len() as u64 + (SECTOR_SIZE as u64 - 1)) / SECTOR_SIZE as u64) as u32;
         let mut buffer_address = buf.as_ptr() as u32;
+
+        self.offset += u64::from(sector_count);
 
         while sector_count > 0 {
             let sectors = u32::min(sector_count, 0x20) as u16;

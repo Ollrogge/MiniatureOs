@@ -172,6 +172,11 @@ fn start(disk_number: u8, partition_table_start: *const u8) -> ! {
     // todo: kernel info
     let bios_info = BiosInfo::new(Region::new(0, 0), mode_info.to_framebuffer_info());
 
+    println!("Waiting");
+    loop {
+        hlt();
+    }
+
     enter_protected_mode_and_jump_to_stage3(STAGE3_DST, &bios_info);
 
     loop {

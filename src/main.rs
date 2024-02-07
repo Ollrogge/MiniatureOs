@@ -11,6 +11,7 @@ fn main() {
 
     command
         .args(["-drive", "format=raw,file=disk_image.img"])
+        .arg("-s")
         .arg("-no-reboot")
         .arg("-nographic")
         .args(["-monitor", "/dev/null"]);

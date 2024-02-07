@@ -1,13 +1,12 @@
-use crate::{disk::SECTOR_SIZE, print, println};
-use core::{char::DecodeUtf16Error, convert::TryFrom, default::Default, ptr, slice, str};
+use crate::{
+    disk::{self, SECTOR_SIZE},
+    print, println,
+};
+use core::{
+    arch::asm, char::DecodeUtf16Error, convert::TryFrom, default::Default, ptr, slice, str,
+};
 
-fn copy_bytes(dst: &mut [u8], src: &[u8]) {
-    assert!(src.len() <= dst.len());
-    let min_len = src.len().min(dst.len());
-    for i in 0..min_len {
-        dst[i] = src[i];
-    }
-}
+// FAT is a very simple file system -- nothing more than a singly-linked list of clusters in a gigantic table
 
 use crate::disk::{Read, Seek, SeekFrom};
 // BIOS Parameter block
@@ -40,6 +39,16 @@ enum FatType {
     Fat12,
     Fat16,
     Fat32,
+}
+
+impl FatType {
+    pub fn classification_threshold(&self) -> u32 {
+        match self {
+            FatType::Fat12 => 0xFF7,
+            FatType::Fat16 => 0xFFF7,
+            FatType::Fat32 => 0xFFFFFF7,
+        }
+    }
 }
 
 // https://wiki.osdev.org/FAT
@@ -144,6 +153,10 @@ impl Bpb {
         assert!(size == 512 * 32);
 
         size
+    }
+
+    fn first_fat_sector(&self) -> u32 {
+        self.reserved_sector_count as u32
     }
 }
 
@@ -404,6 +417,16 @@ impl<D: Read + Seek> FileSystem<D> {
         RootDirIter::new(buffer)
     }
 
+    // The clusters of a file need not be right next to each other on the disk.
+    // In fact it is likely that they are scattered widely throughout the disk
+    // The FAT allows the operating system to follow the "chain" of clusters in a file.
+
+    pub fn file_clusters<'a>(
+        &'a mut self,
+        file: &File,
+    ) -> impl Iterator<Item = Result<Cluster, ()>> + 'a {
+    }
+
     pub fn find_file_in_root_dir(&mut self, name: &str) -> Option<File> {
         // todo: somehow not hardcode this ?
         // FAT16: common to have a root directory with max 512 entries of size 32
@@ -429,6 +452,8 @@ impl<D: Read + Seek> FileSystem<D> {
         for i in 0..sectors {
             self.disk.read_exact(&mut buffer);
             let dest = dest.wrapping_add(i * SECTOR_SIZE);
+
+            //println!("Buf: {:?}", buffer);
 
             unsafe {
                 ptr::copy_nonoverlapping(buffer.as_ptr(), dest, buffer.len());
@@ -476,5 +501,141 @@ impl<'a> Iterator for RootDirIter<'a> {
             },
             Err(e) => None,
         }
+    }
+}
+
+#[derive(Debug)]
+pub enum FatLookupError {
+    BadCluster,
+    ReservedCluster,
+}
+
+enum FatEntry {
+    EndOfFile,
+    Cluster(u32),
+}
+
+impl FatEntry {
+    fn parse(
+        val: u32,
+        typ: FatType,
+        maximum_valid_cluster: u32,
+    ) -> Result<FatEntry, FatLookupError> {
+        match val {
+            0 | 1 => Err(FatLookupError::ReservedCluster),
+            entry => {
+                if entry > typ.classification_threshold() {
+                    Ok(FatEntry::EndOfFile)
+                } else if entry == typ.classification_threshold() {
+                    Err(FatLookupError::BadCluster)
+                } else {
+                    Ok(FatEntry::Cluster(val))
+                }
+            }
+        }
+    }
+}
+
+struct FileAllocationTable {
+    typ: FatType,
+    first_sector: u32,
+    sector_size: u16,
+}
+
+impl FileAllocationTable {
+    pub fn new(typ: FatType, first_sector: u32, sector_size: u16) -> FileAllocationTable {
+        FileAllocationTable {
+            typ,
+            first_sector,
+            sector_size,
+        }
+    }
+
+    pub fn get_value<D: Read + Seek>(&self, disk: &mut D, cluster: u32) -> u32 {
+        match self.typ {
+            FatType::Fat12 => {
+                let fat_offset = cluster + (cluster / 2);
+                let fat_sector = self.first_sector + (fat_offset / u32::from(self.sector_size));
+                let entry_offset = (fat_offset % u32::from(self.sector_size)) as usize;
+
+                let mut sector = [0u8; disk::SECTOR_SIZE];
+                disk.read_exact(&mut sector);
+
+                let value =
+                    u16::from_le_bytes(sector[entry_offset..entry_offset + 2].try_into().unwrap());
+
+                if cluster & 1 == 1 {
+                    u32::from(value >> 4)
+                } else {
+                    u32::from(value & 0xfff)
+                }
+            }
+            FatType::Fat16 => {
+                let fat_offset = cluster * 2;
+                let fat_sector = self.first_sector + (fat_offset / u32::from(self.sector_size));
+                let entry_offset = (fat_offset % u32::from(self.sector_size)) as usize;
+
+                disk.seek(SeekFrom::Start(u64::from(fat_sector)));
+
+                let mut sector = [0u8; disk::SECTOR_SIZE];
+                disk.read_exact(&mut sector);
+
+                u32::from(u16::from_le_bytes(
+                    sector[entry_offset..entry_offset + 2].try_into().unwrap(),
+                ))
+            }
+            FatType::Fat32 => {
+                let fat_offset = cluster * 4;
+                let fat_sector = self.first_sector + (fat_offset / u32::from(self.sector_size));
+                let entry_offset = (fat_offset % u32::from(self.sector_size)) as usize;
+
+                disk.seek(SeekFrom::Start(u64::from(fat_sector)));
+
+                let mut sector = [0u8; disk::SECTOR_SIZE];
+                disk.read_exact(&mut sector);
+
+                u32::from_le_bytes(sector[entry_offset..entry_offset + 4].try_into().unwrap())
+                    & 0x0FFFFFFF
+            }
+        }
+    }
+}
+
+struct Cluster {
+    start_sector: u32,
+    size: u8,
+}
+
+impl Cluster {
+    pub fn new(start_sector: u32, size: u8) -> Cluster {
+        Cluster { start_sector, size }
+    }
+}
+
+struct FileIter<'a, D> {
+    disk: &'a mut D,
+    current_cluster: u32,
+    bpb: &'a Bpb,
+    fat_table: FileAllocationTable,
+}
+
+impl<D> FileIter<'_, D>
+where
+    D: Read + Seek,
+{
+    fn new(disk: &'a mut D, current_cluster: u32, bpb: &'a Bpb) -> Self {
+        FileIter {
+            disk,
+            current_cluster,
+            bpb,
+            fat_table: FileAllocationTable::new(
+                bpb.fat_type(),
+                bpb.first_fat_sector(),
+                bpb.bytes_per_sector,
+            ),
+        }
+    }
+    fn next_cluster(&mut self) -> Option<Cluster> {
+        None
     }
 }
