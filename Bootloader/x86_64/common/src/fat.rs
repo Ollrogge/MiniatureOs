@@ -32,9 +32,14 @@ pub struct Bpb {
     root_cluster: u32,
 }
 
-type Error = ();
+#[derive(Debug)]
+pub enum FatError {
+    FileNotFound,
+    DirEntryError,
+    FileReadError,
+}
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Copy)]
 enum FatType {
     Fat12,
     Fat16,
@@ -158,6 +163,14 @@ impl Bpb {
     fn first_fat_sector(&self) -> u32 {
         self.reserved_sector_count as u32
     }
+
+    fn first_cluster_sector(&self, cluster_number: u32) -> u32 {
+        ((cluster_number - 2) * u32::from(self.sectors_per_cluster)) + self.first_data_sector()
+    }
+
+    pub fn bytes_per_cluster(&self) -> u32 {
+        self.bytes_per_sector as u32 * self.sectors_per_cluster as u32
+    }
 }
 
 #[derive(PartialEq, Default, Clone)]
@@ -213,7 +226,7 @@ impl DirEntry {
     const END_OF_DIRECTORY: u8 = 0x0;
     const UNUSED_ENTRY: u8 = 0xe5;
     const NORMAL_ENTRY_SIZE: usize = 0x20;
-    fn parse(raw: &[u8]) -> Result<(usize, DirEntry), Error> {
+    fn parse(raw: &[u8]) -> Result<(usize, DirEntry), FatError> {
         if raw[0] == Self::END_OF_DIRECTORY {
             return Ok((Self::NORMAL_ENTRY_SIZE, DirEntry::EndOfDir));
         } else if raw[0] == Self::UNUSED_ENTRY {
@@ -351,6 +364,7 @@ pub struct LongNameDirEntry {
     pub filename: [char; 255],
     pub first_cluster: u32,
     attributes: FileAttributes,
+    // in bytes
     size: u32,
 }
 
@@ -384,6 +398,10 @@ impl File {
     pub fn new(start_sector: u32, size: u32) -> File {
         File { start_sector, size }
     }
+
+    pub fn size_in_sectors(&self) -> u32 {
+        (self.size + (SECTOR_SIZE - 1) as u32) / SECTOR_SIZE as u32
+    }
 }
 
 pub struct FileSystem<D> {
@@ -391,7 +409,7 @@ pub struct FileSystem<D> {
     bpb: Bpb,
 }
 
-impl<D: Read + Seek> FileSystem<D> {
+impl<D: Read + Seek + Clone> FileSystem<D> {
     pub fn parse(mut disk: D) -> Self {
         Self {
             bpb: Bpb::parse(&mut disk),
@@ -402,7 +420,7 @@ impl<D: Read + Seek> FileSystem<D> {
     pub fn read_root_dir<'a>(
         &mut self,
         buffer: &'a mut [u8],
-    ) -> impl Iterator<Item = Result<DirEntry, ()>> + 'a {
+    ) -> impl Iterator<Item = Result<DirEntry, FatError>> + 'a {
         assert!(buffer.len() == self.bpb.root_dir_size() as usize);
 
         if self.bpb.fat_type() == FatType::Fat32 {
@@ -415,16 +433,6 @@ impl<D: Read + Seek> FileSystem<D> {
         self.disk.read_exact(buffer);
 
         RootDirIter::new(buffer)
-    }
-
-    // The clusters of a file need not be right next to each other on the disk.
-    // In fact it is likely that they are scattered widely throughout the disk
-    // The FAT allows the operating system to follow the "chain" of clusters in a file.
-
-    pub fn file_clusters<'a>(
-        &'a mut self,
-        file: &File,
-    ) -> impl Iterator<Item = Result<Cluster, ()>> + 'a {
     }
 
     pub fn find_file_in_root_dir(&mut self, name: &str) -> Option<File> {
@@ -442,25 +450,64 @@ impl<D: Read + Seek> FileSystem<D> {
         }
     }
 
-    pub fn try_load_file(&mut self, name: &str, dest: *mut u8) -> Result<(), Error> {
-        let file = self.find_file_in_root_dir(name).ok_or(())?;
+    // The clusters of a file need not be right next to each other on the disk.
+    // In fact it is likely that they are scattered widely throughout the disk
+    // The FAT allows the operating system to follow the "chain" of clusters in a file.
+    pub fn file_clusters<'a>(
+        &'a mut self,
+        file: &File,
+    ) -> impl Iterator<Item = Result<Cluster, FatError>> + 'a {
+        FileIter::new(&mut self.disk, file.start_sector, &self.bpb)
+    }
+
+    pub fn try_load_file(&mut self, name: &str, dest: *mut u8) -> Result<(), FatError> {
+        let file = self
+            .find_file_in_root_dir(name)
+            .ok_or(FatError::FileNotFound)?;
         let mut buffer = [0u8; SECTOR_SIZE];
-        let mut sectors = file.size as usize / SECTOR_SIZE + 1;
-        self.disk
-            .seek(SeekFrom::Start(u64::from(file.start_sector)));
 
-        for i in 0..sectors {
-            self.disk.read_exact(&mut buffer);
-            let dest = dest.wrapping_add(i * SECTOR_SIZE);
+        let mut disk = self.disk.clone();
 
-            //println!("Buf: {:?}", buffer);
+        let mut sectors_read = 0x0;
+        for cluster in self.file_clusters(&file) {
+            let cluster = cluster?;
+            disk.seek(SeekFrom::Start(u64::from(cluster.start_sector)));
 
-            unsafe {
-                ptr::copy_nonoverlapping(buffer.as_ptr(), dest, buffer.len());
+            /*
+            println!(
+                "Reading sector: {} {} {}",
+                sectors_read,
+                file.size_in_sectors(),
+                file.size
+            );
+            */
+
+            for _ in 0..cluster.size {
+                disk.read_exact(&mut buffer);
+
+                let dest = dest.wrapping_add(sectors_read * SECTOR_SIZE);
+                sectors_read += 1;
+
+                //println!("Buf: {:?}", buffer);
+
+                unsafe {
+                    ptr::copy_nonoverlapping(buffer.as_ptr(), dest, buffer.len());
+                }
             }
         }
 
-        Ok(())
+        if sectors_read != file.size_in_sectors() as usize {
+            println!(
+                "Error: sectors read != file.size, {} != {}, {}",
+                sectors_read,
+                file.size_in_sectors(),
+                self.bpb.bytes_per_cluster()
+            );
+            Err(FatError::FileReadError)
+            //Ok(())
+        } else {
+            Ok(())
+        }
     }
 
     pub fn disk(&mut self) -> &mut D {
@@ -478,7 +525,7 @@ impl<'a> RootDirIter<'a> {
         RootDirIter { buf, offset: 0 }
     }
 
-    pub fn next_entry(&mut self) -> Result<DirEntry, Error> {
+    pub fn next_entry(&mut self) -> Result<DirEntry, FatError> {
         match DirEntry::parse(&self.buf[self.offset..]) {
             Ok((size, entry)) => {
                 self.offset += size;
@@ -490,7 +537,7 @@ impl<'a> RootDirIter<'a> {
 }
 
 impl<'a> Iterator for RootDirIter<'a> {
-    type Item = Result<DirEntry, Error>;
+    type Item = Result<DirEntry, FatError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.next_entry() {
@@ -499,7 +546,7 @@ impl<'a> Iterator for RootDirIter<'a> {
                 DirEntry::Unused => self.next(),
                 _ => Some(Ok(entry)),
             },
-            Err(e) => None,
+            Err(e) => Some(Err(e)),
         }
     }
 }
@@ -513,23 +560,21 @@ pub enum FatLookupError {
 enum FatEntry {
     EndOfFile,
     Cluster(u32),
+    BadCluster,
+    ReservedCluster,
 }
 
 impl FatEntry {
-    fn parse(
-        val: u32,
-        typ: FatType,
-        maximum_valid_cluster: u32,
-    ) -> Result<FatEntry, FatLookupError> {
+    fn parse(val: u32, typ: FatType) -> FatEntry {
         match val {
-            0 | 1 => Err(FatLookupError::ReservedCluster),
+            0 | 1 => FatEntry::ReservedCluster,
             entry => {
                 if entry > typ.classification_threshold() {
-                    Ok(FatEntry::EndOfFile)
+                    FatEntry::EndOfFile
                 } else if entry == typ.classification_threshold() {
-                    Err(FatLookupError::BadCluster)
+                    FatEntry::BadCluster
                 } else {
-                    Ok(FatEntry::Cluster(val))
+                    FatEntry::Cluster(val)
                 }
             }
         }
@@ -551,14 +596,19 @@ impl FileAllocationTable {
         }
     }
 
-    pub fn get_value<D: Read + Seek>(&self, disk: &mut D, cluster: u32) -> u32 {
-        match self.typ {
+    pub fn get_entry<D: Read + Seek>(&self, disk: &mut D, cluster: u32) -> FatEntry {
+        let val = match self.typ {
             FatType::Fat12 => {
                 let fat_offset = cluster + (cluster / 2);
                 let fat_sector = self.first_sector + (fat_offset / u32::from(self.sector_size));
                 let entry_offset = (fat_offset % u32::from(self.sector_size)) as usize;
 
-                let mut sector = [0u8; disk::SECTOR_SIZE];
+                disk.seek(SeekFrom::Start(u64::from(fat_sector)));
+
+                // special case for 12 bit entries. They might not be sector aligned.
+                // In this case an entry might straddle the sector-size boundary.
+                // So just read two sectors in.
+                let mut sector = [0u8; disk::SECTOR_SIZE * 2];
                 disk.read_exact(&mut sector);
 
                 let value =
@@ -597,10 +647,13 @@ impl FileAllocationTable {
                 u32::from_le_bytes(sector[entry_offset..entry_offset + 4].try_into().unwrap())
                     & 0x0FFFFFFF
             }
-        }
+        };
+
+        FatEntry::parse(val, self.typ)
     }
 }
 
+/// smallest unit of space allocation for files and dirs on FAT fs
 struct Cluster {
     start_sector: u32,
     size: u8,
@@ -619,7 +672,7 @@ struct FileIter<'a, D> {
     fat_table: FileAllocationTable,
 }
 
-impl<D> FileIter<'_, D>
+impl<'a, D> FileIter<'a, D>
 where
     D: Read + Seek,
 {
@@ -635,7 +688,36 @@ where
             ),
         }
     }
-    fn next_cluster(&mut self) -> Option<Cluster> {
-        None
+
+    fn next_cluster(&mut self) -> Result<Option<Cluster>, FatError> {
+        match self.fat_table.get_entry(self.disk, self.current_cluster) {
+            FatEntry::BadCluster | FatEntry::ReservedCluster => Err(FatError::FileReadError),
+            FatEntry::EndOfFile => Ok(None),
+            FatEntry::Cluster(cluster_number) => {
+                let cluster = Cluster::new(
+                    self.bpb.first_cluster_sector(self.current_cluster),
+                    self.bpb.sectors_per_cluster,
+                );
+                self.current_cluster = cluster_number;
+                Ok(Some(cluster))
+            }
+        }
+    }
+}
+
+impl<'a, D> Iterator for FileIter<'a, D>
+where
+    D: Read + Seek,
+{
+    type Item = Result<Cluster, FatError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.next_cluster() {
+            Ok(entry) => match entry {
+                Some(cluster) => Some(Ok(cluster)),
+                None => None,
+            },
+            Err(e) => Some(Err(e)),
+        }
     }
 }

@@ -15,6 +15,7 @@ pub trait Read {
     fn read_exact(&mut self, buf: &mut [u8]);
 }
 
+#[derive(Clone)]
 pub struct DiskAccess {
     pub disk_number: u8,
     // both have sectors as unit
