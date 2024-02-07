@@ -1,3 +1,5 @@
 /target
 disk_image.img
 .gdb_history
+.gdb_history
+tags

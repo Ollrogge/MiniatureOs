@@ -1,4 +1,5 @@
-use crate::println;
+//! Memory information
+//! https://wiki.osdev.org/Detecting_Memory_(x86)#Getting_an_E820_Memory_Map (c code)
 use core::{arch::asm, convert::AsRef, mem::size_of};
 
 #[derive(Default, Clone, Copy, Debug)]
@@ -13,6 +14,7 @@ pub enum E820MemoryRegionType {
     Unusable,
 }
 
+/// Memory information returned by BIOS 0xe820 command
 #[derive(Default, Clone, Copy)]
 #[repr(C)]
 pub struct E820MemoryRegion {
@@ -28,20 +30,12 @@ pub struct MemoryMap {
     size: usize,
 }
 
-impl AsRef<[E820MemoryRegion]> for MemoryMap {
-    fn as_ref(&self) -> &[E820MemoryRegion] {
-        &self.map[..self.size]
-    }
-}
-
-// https://wiki.osdev.org/Detecting_Memory_(x86)#Getting_an_E820_Memory_Map (c code)
 impl MemoryMap {
     pub fn get() -> Result<MemoryMap, ()> {
         let mut obj = Self::default();
         const MAGIC_NUMBER: u32 = 0x534D4150;
         let mut offset = 0x0;
         let mut signature = MAGIC_NUMBER;
-        //let memory_map = unsafe { MEMORY_MAP.get_mut() };
         let mut len = 0x0;
         let mut entries = 0x0;
 

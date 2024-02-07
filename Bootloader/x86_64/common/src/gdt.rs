@@ -1,23 +1,24 @@
-use crate::println;
+//! Global Descriptor Table definitions
 use bit_field::BitField;
 use bitflags::bitflags;
 use core::arch::asm;
 
 bitflags! {
+    /// Combines the access byte and flags of a segment descriptor
     struct SegmentDescriptorFlags: u64 {
-        // readable if code segment, read and writable if data segment
+        /// Readable if code segment, read and writable if data segment
         const READ_WRITE = 1 << 41;
         const CONFORMING = 1 << 42;
         const EXECUTABLE = 1 << 43;
-        // type of segment: user (64 bit) or kernel (128 bit)
+        /// Type of segment: if set then user segment (64 bit), else kernel segment (128 bit)
         const USER_SEGMENT = 1 << 44;
-        // entry refers to valid segment
+        /// Entry refers to valid segment
         const PRESENT = 1 << 47;
-        // true if descriptor defines a 64-bit code segment
+        /// Set if descriptor defines a 64-bit code segment
         const LONG_MODE = 1 << 53;
-        // true if descriptor defines a 32-bit protected mode segment
+        /// Set if descriptor defines a 32-bit protected mode segment
         const PROTECTED_MODE = 1 << 54;
-        // If set limit is in 4 KiB blocks, else byte blocks
+        /// If set limit is in 4 KiB blocks, else byte blocks
         const GRANULARITY = 1 << 55;
    }
 }
@@ -66,17 +67,18 @@ impl SegmentDescriptor {
     }
 }
 
+const GLOBAL_DESCRIPTOR_TABLE_ENTRY_COUNT: usize = 0x8;
 #[derive(Debug)]
 #[repr(C)]
 pub struct GlobalDescriptorTable {
-    entries: [u64; 8],
+    entries: [u64; GLOBAL_DESCRIPTOR_TABLE_ENTRY_COUNT],
     size: usize,
 }
 
 impl GlobalDescriptorTable {
     pub fn new() -> GlobalDescriptorTable {
         GlobalDescriptorTable {
-            entries: [0x0; 8],
+            entries: [0x0; GLOBAL_DESCRIPTOR_TABLE_ENTRY_COUNT],
             // entry 0 is null by default
             size: 1,
         }

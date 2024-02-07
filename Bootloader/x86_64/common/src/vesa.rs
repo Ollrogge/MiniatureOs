@@ -1,9 +1,17 @@
+//! VESA BIOS Extension (VBE) definitions
+//! https://wiki.osdev.org/VESA_Video_Modes
+//! http://www.petesqbsite.com/sections/tutorials/tuts/vbe3.pdf
+//! specification for standard software access to graphics display controllers
+//! which support resolutions, color depths, and frame buffer organizations
+//! beyond the VGA hardware standard
 use crate::{const_assert, println, BiosFramebufferInfo, PixelFormat, Region};
 use core::{arch::asm, default::Default, mem::size_of};
 
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 struct RealModePtr(u32);
+
+const VESA_SUCCESS: u16 = 0x4f;
 
 impl RealModePtr {
     pub fn segment(&self) -> u16 {
@@ -15,10 +23,11 @@ impl RealModePtr {
     }
 }
 
+/// Display controller info
 #[derive(Debug)]
 #[repr(C, packed)]
 #[allow(dead_code)]
-pub struct VesaInfo {
+pub struct VbeInfo {
     signature: [u8; 4], // should be "VESA"
     version: u16,       // should be 0x0300 for VBE 3.0
     oem_string_ptr: RealModePtr,
@@ -27,11 +36,11 @@ pub struct VesaInfo {
     total_memory: u16, // number of 64KB blocks
     reserved: [u8; 512 - 0x14],
 }
-const_assert!(size_of::<VesaInfo>() == 512, "VbeInfoBlock size");
+const_assert!(size_of::<VbeInfo>() == 512, "VbeInfoBlock size");
 
-impl Default for VesaInfo {
-    fn default() -> VesaInfo {
-        VesaInfo {
+impl Default for VbeInfo {
+    fn default() -> VbeInfo {
+        VbeInfo {
             signature: [0; 4],
             version: 0,
             oem_string_ptr: RealModePtr(0),
@@ -43,7 +52,7 @@ impl Default for VesaInfo {
     }
 }
 
-impl VesaInfo {
+impl VbeInfo {
     pub fn get() -> Result<Self, u16> {
         let mut obj = Self::default();
         let mut ret = 0x0;
@@ -52,7 +61,7 @@ impl VesaInfo {
         }
 
         match ret {
-            0x004f => Ok(obj),
+            VESA_SUCCESS => Ok(obj),
             _ => Err(ret),
         }
     }
@@ -94,7 +103,7 @@ impl VesaInfo {
                 None => break,
             };
 
-            let info = match VesaModeInfo::get(mode) {
+            let info = match VbeModeInfo::get(mode) {
                 Ok(info) => info,
                 Err(c) => {
                     println!("VesaModeInfo query failed with code: {:x}", c);
@@ -146,15 +155,16 @@ impl VesaInfo {
         }
 
         match ret {
-            0x4f => Ok(()),
+            VESA_SUCCESS => Ok(()),
             _ => Err(ret),
         }
     }
 }
 
+/// Information about a specific display mode
 #[derive(Debug)]
 #[repr(C)]
-pub struct VesaModeInfo {
+pub struct VbeModeInfo {
     attributes: u16,
     window_a: u8,
     window_b: u8,
@@ -189,11 +199,11 @@ pub struct VesaModeInfo {
     off_screen_memory_size: u16,
     reserved: [u8; 206],
 }
-const_assert!(size_of::<VesaModeInfo>() == 256, "VbeModeInfo size");
+const_assert!(size_of::<VbeModeInfo>() == 256, "VbeModeInfo size");
 
-impl Default for VesaModeInfo {
-    fn default() -> VesaModeInfo {
-        VesaModeInfo {
+impl Default for VbeModeInfo {
+    fn default() -> VbeModeInfo {
+        VbeModeInfo {
             attributes: 0,
             window_a: 0,
             window_b: 0,
@@ -231,17 +241,17 @@ impl Default for VesaModeInfo {
     }
 }
 
-impl VesaModeInfo {
+impl VbeModeInfo {
     pub fn get(mode: u16) -> Result<Self, u16> {
         let mut obj = Self::default();
-        let ptr = RealModePtr(&mut obj as *mut VesaModeInfo as u32);
+        let ptr = RealModePtr(&mut obj as *mut VbeModeInfo as u32);
         let mut ret: u16;
         unsafe {
             asm!("push es", "mov es, {:x}", "int 0x10", "pop es", in(reg) ptr.segment(), in("di") ptr.offset(), inout("ax") 0x4f01u16 => ret, in("cx") mode);
         }
 
         match ret {
-            0x4f => Ok(obj),
+            VESA_SUCCESS => Ok(obj),
             _ => Err(ret),
         }
     }

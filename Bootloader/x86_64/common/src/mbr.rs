@@ -18,6 +18,9 @@ pub struct PartitionTableEntry {
     pub sector_count: u32,
 }
 
+pub const PARTITION_TABLE_ENTRY_COUNT: usize = 0x4;
+pub const PARTITION_TABLE_ENTRY_SIZE: usize = 0x10;
+
 impl PartitionTableEntry {
     pub fn new(
         bootable: bool,

@@ -1,5 +1,7 @@
 #![no_std]
 #![no_main]
+//! Master boot record code (stage1). Real mode
+//! Just read next stage into memory and jump to it.
 
 use core::{arch::global_asm, slice, usize};
 

@@ -1,3 +1,6 @@
+//! Disk access using BIOS function 0x42 (read hard disk in LBA mode)
+//! https://wiki.osdev.org/BIOS
+//! https://wiki.osdev.org/Disk_access_using_the_BIOS_(INT_13h)
 use core::arch::asm;
 
 #[repr(C, packed)]
@@ -26,7 +29,6 @@ impl DiskAddressPacket {
         }
     }
 
-    // https://wiki.osdev.org/BIOS
     // https://wiki.osdev.org/Disk_access_using_the_BIOS_(INT_13h)
     pub unsafe fn load(&self, disk_number: u8) {
         let self_addr = self as *const Self as u16;

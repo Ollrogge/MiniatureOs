@@ -1,36 +1,21 @@
+//! //! FAT file system parser
+//!
+//! The file system consists of three basic components:
+//!
+//! - Boot record
+//! - File Allocation Table (FAT)
+//! - Directory and data area
+//!
+//! Basically just a big single-linked list of clusters in a big table
+//! https://wiki.osdev.org/FAT
+use crate::disk::{Read, Seek, SeekFrom};
 use crate::{
     disk::{self, SECTOR_SIZE},
     print, println,
 };
-use core::{
-    arch::asm, char::DecodeUtf16Error, convert::TryFrom, default::Default, ptr, slice, str,
-};
+use core::{default::Default, ptr, str};
 
-// FAT is a very simple file system -- nothing more than a singly-linked list of clusters in a gigantic table
-
-use crate::disk::{Read, Seek, SeekFrom};
-// BIOS Parameter block
-#[derive(Debug)]
-pub struct Bpb {
-    bytes_per_sector: u16,
-    // cluster = smallest unit of space allocation for files and dirs on FAT fs
-    sectors_per_cluster: u8,
-    // number of sectors before first FAT
-    reserved_sector_count: u16,
-    // amount of copies of FAT present on disk. Multiple used due to redundancy
-    // reasons. If one FAT is damaged it can be repaired using the backup'ed one
-    fat_count: u8,
-    // number of root directory entries
-    root_entry_count: u16,
-    // total number of sectors on disk
-    total_sectors_16: u16,
-    total_sectors_32: u32,
-    // Size of the FAT data structure in sectors
-    fat16_size: u16,
-    fat32_size: u32,
-    // start cluster of root directory
-    root_cluster: u32,
-}
+const ROOT_DIR_ENTRY_SIZE: usize = 0x20;
 
 #[derive(Debug)]
 pub enum FatError {
@@ -56,11 +41,36 @@ impl FatType {
     }
 }
 
-// https://wiki.osdev.org/FAT
-impl Bpb {
+/// BIOS Parameter block
+/// Gives u metadata about the disk
+#[derive(Debug)]
+pub struct BiosParameterBlock {
+    bytes_per_sector: u16,
+    /// cluster = smallest unit of space allocation for files and dirs on FAT fs
+    sectors_per_cluster: u8,
+    /// number of sectors before first FAT
+    reserved_sector_count: u16,
+    /// amount of copies of FAT present on disk. Multiple used due to redundancy
+    /// reasons. If one FAT is damaged it can be repaired using the backup'ed one
+    fat_count: u8,
+    // number of root directory entries
+    root_entry_count: u16,
+    /// total number of sectors on disk
+    total_sectors_16: u16,
+    /// total number of sectors on disk
+    total_sectors_32: u32,
+    /// Size of the FAT data structure in sectors
+    fat16_size: u16,
+    /// Size of the FAT data structure in sectors
+    fat32_size: u32,
+    // start cluster of root directory
+    root_cluster: u32,
+}
+
+impl BiosParameterBlock {
     pub fn parse<D: Read + Seek>(disk: &mut D) -> Self {
         disk.seek(SeekFrom::Start(0));
-        let mut raw = [0u8; 512];
+        let mut raw = [0u8; SECTOR_SIZE];
         disk.read_exact(&mut raw);
 
         let bytes_per_sector = u16::from_le_bytes(raw[11..13].try_into().unwrap());
@@ -86,7 +96,7 @@ impl Bpb {
             fat32_size = u32::from_le_bytes(raw[36..40].try_into().unwrap());
             root_cluster = u32::from_le_bytes(raw[44..48].try_into().unwrap());
         } else {
-            panic!("ExactlyOneTotalSectorsFieldMustBeZero");
+            panic!("Exactly one total sector field must be zero");
         }
 
         Self {
@@ -104,7 +114,8 @@ impl Bpb {
     }
 
     fn root_dir_sectors(&self) -> u32 {
-        ((self.root_entry_count as u32 * 32) + (self.bytes_per_sector as u32 - 1))
+        ((self.root_entry_count as u32 * ROOT_DIR_ENTRY_SIZE as u32)
+            + (self.bytes_per_sector as u32 - 1))
             / self.bytes_per_sector as u32
     }
 
@@ -152,12 +163,7 @@ impl Bpb {
     }
 
     fn root_dir_size(&self) -> u16 {
-        let size = self.root_entry_count * 32;
-
-        // 16384
-        assert!(size == 512 * 32);
-
-        size
+        self.root_entry_count * ROOT_DIR_ENTRY_SIZE as u16
     }
 
     fn first_fat_sector(&self) -> u32 {
@@ -215,28 +221,28 @@ impl PartialEq<FileAttributes> for u8 {
     }
 }
 
-pub enum DirEntry {
+pub enum DirectoryEntry {
     Unused,
     EndOfDir,
-    NormalDirEntry(NormalDirEntry),
-    LongNameDirEntry(LongNameDirEntry),
+    NormalDirEntry(NormalDirectoryEntry),
+    LongNameDirEntry(LongNameDirectoryEntry),
 }
 
-impl DirEntry {
+impl DirectoryEntry {
     const END_OF_DIRECTORY: u8 = 0x0;
     const UNUSED_ENTRY: u8 = 0xe5;
     const NORMAL_ENTRY_SIZE: usize = 0x20;
-    fn parse(raw: &[u8]) -> Result<(usize, DirEntry), FatError> {
+    fn parse(raw: &[u8]) -> Result<(usize, DirectoryEntry), FatError> {
         if raw[0] == Self::END_OF_DIRECTORY {
-            return Ok((Self::NORMAL_ENTRY_SIZE, DirEntry::EndOfDir));
+            return Ok((Self::NORMAL_ENTRY_SIZE, DirectoryEntry::EndOfDir));
         } else if raw[0] == Self::UNUSED_ENTRY {
-            return Ok((Self::NORMAL_ENTRY_SIZE, DirEntry::Unused));
+            return Ok((Self::NORMAL_ENTRY_SIZE, DirectoryEntry::Unused));
         }
 
         let attributes = FileAttributes(raw[11]);
 
         if attributes == FileAttributes::LONG_FILE_NAME {
-            let mut long_name_entry = LongNameDirEntry::default();
+            let mut long_name_entry = LongNameDirectoryEntry::default();
             let mut name_idx = 0x0;
             let mut total_size = 0x0;
 
@@ -262,11 +268,12 @@ impl DirEntry {
                 // which they belong. The long file name entries are always
                 // placed immediately before their 8.3 entry.
                 } else {
-                    long_name_entry.first_cluster =
+                    long_name_entry.first_cluster_number =
                         u32::from(u16::from_le_bytes(entry[20..22].try_into().unwrap())) << 16
                             | u32::from(u16::from_le_bytes(entry[26..28].try_into().unwrap()));
 
-                    long_name_entry.size = u32::from_le_bytes(entry[28..32].try_into().unwrap());
+                    long_name_entry.size_in_bytes =
+                        u32::from_le_bytes(entry[28..32].try_into().unwrap());
 
                     long_name_entry.attributes = attributes;
 
@@ -277,32 +284,38 @@ impl DirEntry {
 
             assert!(total_size != 0);
 
-            Ok((total_size, DirEntry::LongNameDirEntry(long_name_entry)))
+            Ok((
+                total_size,
+                DirectoryEntry::LongNameDirEntry(long_name_entry),
+            ))
         } else {
-            let mut entry = NormalDirEntry::default();
+            let mut entry = NormalDirectoryEntry::default();
             for (i, &b) in raw[0..entry.filename.len()].iter().enumerate() {
                 entry.filename[i] = char::from(b);
             }
             entry.attributes = attributes;
-            entry.first_cluster = u32::from(u16::from_le_bytes(raw[20..22].try_into().unwrap()))
-                << 16
-                | u32::from(u16::from_le_bytes(raw[26..28].try_into().unwrap()));
+            entry.first_cluster_number =
+                u32::from(u16::from_le_bytes(raw[20..22].try_into().unwrap())) << 16
+                    | u32::from(u16::from_le_bytes(raw[26..28].try_into().unwrap()));
 
-            entry.size = u32::from_le_bytes(raw[28..32].try_into().unwrap());
+            entry.size_in_bytes = u32::from_le_bytes(raw[28..32].try_into().unwrap());
 
-            Ok((Self::NORMAL_ENTRY_SIZE, DirEntry::NormalDirEntry(entry)))
+            Ok((
+                Self::NORMAL_ENTRY_SIZE,
+                DirectoryEntry::NormalDirEntry(entry),
+            ))
         }
     }
 
     pub fn eq_name(&self, name: &str) -> bool {
         match self {
-            DirEntry::NormalDirEntry(e) => e
+            DirectoryEntry::NormalDirEntry(e) => e
                 .filename
                 .iter()
                 .cloned()
                 .take_while(|&c| c != '\0')
                 .eq(name.chars()),
-            DirEntry::LongNameDirEntry(e) => e
+            DirectoryEntry::LongNameDirEntry(e) => e
                 .filename
                 .iter()
                 .cloned()
@@ -314,40 +327,40 @@ impl DirEntry {
 
     pub fn is_dir(&self) -> bool {
         match self {
-            DirEntry::NormalDirEntry(e) => e.attributes.is_set(FileAttributes::DIRECTORY),
-            DirEntry::LongNameDirEntry(e) => e.attributes.is_set(FileAttributes::DIRECTORY),
+            DirectoryEntry::NormalDirEntry(e) => e.attributes.is_set(FileAttributes::DIRECTORY),
+            DirectoryEntry::LongNameDirEntry(e) => e.attributes.is_set(FileAttributes::DIRECTORY),
             _ => false,
         }
     }
 
     pub fn first_cluster(&self) -> u32 {
         match self {
-            DirEntry::NormalDirEntry(e) => e.first_cluster,
-            DirEntry::LongNameDirEntry(e) => e.first_cluster,
+            DirectoryEntry::NormalDirEntry(e) => e.first_cluster_number,
+            DirectoryEntry::LongNameDirEntry(e) => e.first_cluster_number,
             _ => 0,
         }
     }
 
     pub fn file_size(&self) -> u32 {
         match self {
-            DirEntry::NormalDirEntry(e) => e.size,
-            DirEntry::LongNameDirEntry(e) => e.size,
+            DirectoryEntry::NormalDirEntry(e) => e.size_in_bytes,
+            DirectoryEntry::LongNameDirEntry(e) => e.size_in_bytes,
             _ => 0,
         }
     }
 }
 
-// inlcudes only fields needed for loading next stages
+/// Normal directory entries are described exclusively by this struct
 #[derive(Default)]
-pub struct NormalDirEntry {
+pub struct NormalDirectoryEntry {
     filename: [char; 11],
     attributes: FileAttributes,
-    pub first_cluster: u32,
-    // in bytes
-    size: u32,
+    /// Number of first cluster for this file
+    pub first_cluster_number: u32,
+    size_in_bytes: u32,
 }
 
-impl NormalDirEntry {
+impl NormalDirectoryEntry {
     pub fn print_filename(&self) {
         for c in self.filename.iter() {
             print!("{}", c);
@@ -356,19 +369,22 @@ impl NormalDirEntry {
     }
 }
 
-// only when VFAT, completely stores the max 255 bytes long filename as a chain
-// the NormalDirEntry does **not** store the filename when VFAT is supported
-// only a fallback in cases VFAT isn't
-pub struct LongNameDirEntry {
+/// Long name directory entires are used only when the VFAT extension is supported.
+/// With this extension, filenames can be up to 255 characters.
+/// Long name directory entries are represented by a chain of 32 byte long file name entries,
+/// which always end with a normal directory entry struct.
+/// The filename field of the normal directory entry is ignored in this case.
+pub struct LongNameDirectoryEntry {
+    /// Order of this entry in the chain of long file name entries
+    // TODO: handle this ?
     order: u8,
     pub filename: [char; 255],
-    pub first_cluster: u32,
+    pub first_cluster_number: u32,
     attributes: FileAttributes,
-    // in bytes
-    size: u32,
+    size_in_bytes: u32,
 }
 
-impl LongNameDirEntry {
+impl LongNameDirectoryEntry {
     pub fn print_filename(&self) {
         for c in self.filename.iter() {
             print!("{}", c);
@@ -377,14 +393,14 @@ impl LongNameDirEntry {
     }
 }
 
-impl Default for LongNameDirEntry {
-    fn default() -> LongNameDirEntry {
-        LongNameDirEntry {
+impl Default for LongNameDirectoryEntry {
+    fn default() -> LongNameDirectoryEntry {
+        LongNameDirectoryEntry {
             order: 0,
             filename: [0 as char; 255],
             attributes: FileAttributes::new(),
-            first_cluster: 0,
-            size: 0,
+            first_cluster_number: 0,
+            size_in_bytes: 0,
         }
     }
 }
@@ -406,13 +422,13 @@ impl File {
 
 pub struct FileSystem<D> {
     disk: D,
-    bpb: Bpb,
+    bpb: BiosParameterBlock,
 }
 
 impl<D: Read + Seek + Clone> FileSystem<D> {
     pub fn parse(mut disk: D) -> Self {
         Self {
-            bpb: Bpb::parse(&mut disk),
+            bpb: BiosParameterBlock::parse(&mut disk),
             disk,
         }
     }
@@ -420,7 +436,7 @@ impl<D: Read + Seek + Clone> FileSystem<D> {
     pub fn read_root_dir<'a>(
         &mut self,
         buffer: &'a mut [u8],
-    ) -> impl Iterator<Item = Result<DirEntry, FatError>> + 'a {
+    ) -> impl Iterator<Item = Result<DirectoryEntry, FatError>> + 'a {
         assert!(buffer.len() == self.bpb.root_dir_size() as usize);
 
         if self.bpb.fat_type() == FatType::Fat32 {
@@ -438,8 +454,8 @@ impl<D: Read + Seek + Clone> FileSystem<D> {
     pub fn find_file_in_root_dir(&mut self, name: &str) -> Option<File> {
         // todo: somehow not hardcode this ?
         // FAT16: common to have a root directory with max 512 entries of size 32
-        // If I had dynamic memory i could use bpb.root_entry_count
-        let mut buffer = [0u8; 512 * 32];
+        // If I had dynamic memory I could use bpb.root_entry_count
+        let mut buffer = [0u8; 512 * ROOT_DIR_ENTRY_SIZE];
         let mut entries = self.read_root_dir(&mut buffer).filter_map(|e| e.ok());
         let entry = entries.find(|e| e.eq_name(name))?;
 
@@ -460,6 +476,10 @@ impl<D: Read + Seek + Clone> FileSystem<D> {
         FileIter::new(&mut self.disk, file.start_sector, &self.bpb)
     }
 
+    /// A file consists of a sequence of clusters. These clusters are not guaranteed to
+    /// be adjacent to each other. We obtain the sector number of the first cluster
+    /// from the DirectoryEntry. Afterwards we look up the start sectory of any further
+    /// clusters by querying the FAT.
     pub fn try_load_file(&mut self, name: &str, dest: *mut u8) -> Result<(), FatError> {
         let file = self
             .find_file_in_root_dir(name)
@@ -473,22 +493,11 @@ impl<D: Read + Seek + Clone> FileSystem<D> {
             let cluster = cluster?;
             disk.seek(SeekFrom::Start(u64::from(cluster.start_sector)));
 
-            /*
-            println!(
-                "Reading sector: {} {} {}",
-                sectors_read,
-                file.size_in_sectors(),
-                file.size
-            );
-            */
-
-            for _ in 0..cluster.size {
+            for _ in 0..cluster.size_in_sectors {
                 disk.read_exact(&mut buffer);
 
                 let dest = dest.wrapping_add(sectors_read * SECTOR_SIZE);
                 sectors_read += 1;
-
-                //println!("Buf: {:?}", buffer);
 
                 unsafe {
                     ptr::copy_nonoverlapping(buffer.as_ptr(), dest, buffer.len());
@@ -505,7 +514,6 @@ impl<D: Read + Seek + Clone> FileSystem<D> {
                 file.size_in_sectors(),
             );
             Err(FatError::FileReadError)
-            //Ok(())
         } else {
             Ok(())
         }
@@ -526,8 +534,8 @@ impl<'a> RootDirIter<'a> {
         RootDirIter { buf, offset: 0 }
     }
 
-    pub fn next_entry(&mut self) -> Result<DirEntry, FatError> {
-        match DirEntry::parse(&self.buf[self.offset..]) {
+    pub fn next_entry(&mut self) -> Result<DirectoryEntry, FatError> {
+        match DirectoryEntry::parse(&self.buf[self.offset..]) {
             Ok((size, entry)) => {
                 self.offset += size;
                 Ok(entry)
@@ -538,13 +546,13 @@ impl<'a> RootDirIter<'a> {
 }
 
 impl<'a> Iterator for RootDirIter<'a> {
-    type Item = Result<DirEntry, FatError>;
+    type Item = Result<DirectoryEntry, FatError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.next_entry() {
             Ok(entry) => match entry {
-                DirEntry::EndOfDir => None,
-                DirEntry::Unused => self.next(),
+                DirectoryEntry::EndOfDir => None,
+                DirectoryEntry::Unused => self.next(),
                 _ => Some(Ok(entry)),
             },
             Err(e) => Some(Err(e)),
@@ -552,12 +560,7 @@ impl<'a> Iterator for RootDirIter<'a> {
     }
 }
 
-#[derive(Debug)]
-pub enum FatLookupError {
-    BadCluster,
-    ReservedCluster,
-}
-
+/// Entry inside the FileAllocationnTable
 enum FatEntry {
     EndOfFile,
     Cluster(u32),
@@ -582,6 +585,8 @@ impl FatEntry {
     }
 }
 
+/// Table of contents of a disk. Indicates status and location of all data clusters
+/// stored on the disk.
 struct FileAllocationTable {
     typ: FatType,
     first_sector: u32,
@@ -654,22 +659,25 @@ impl FileAllocationTable {
     }
 }
 
-/// smallest unit of space allocation for files and dirs on FAT fs
+/// Smallest unit of space allocation for files and directories on a FAT fs
 struct Cluster {
     start_sector: u32,
-    size: u8,
+    size_in_sectors: u8,
 }
 
 impl Cluster {
     pub fn new(start_sector: u32, size: u8) -> Cluster {
-        Cluster { start_sector, size }
+        Cluster {
+            start_sector,
+            size_in_sectors: size,
+        }
     }
 }
 
 struct FileIter<'a, D> {
     disk: &'a mut D,
     current_entry: FatEntry,
-    bpb: &'a Bpb,
+    bpb: &'a BiosParameterBlock,
     fat_table: FileAllocationTable,
 }
 
@@ -677,7 +685,7 @@ impl<'a, D> FileIter<'a, D>
 where
     D: Read + Seek,
 {
-    fn new(disk: &'a mut D, start_cluster: u32, bpb: &'a Bpb) -> Self {
+    fn new(disk: &'a mut D, start_cluster: u32, bpb: &'a BiosParameterBlock) -> Self {
         FileIter {
             disk,
             current_entry: FatEntry::Cluster(start_cluster),
