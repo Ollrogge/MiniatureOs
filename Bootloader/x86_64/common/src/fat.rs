@@ -496,12 +496,13 @@ impl<D: Read + Seek + Clone> FileSystem<D> {
             }
         }
 
-        if sectors_read != file.size_in_sectors() as usize {
+        // smaller and not equal because we read cluster wise and therefore
+        // might read more sectors than the size of the file
+        if sectors_read < file.size_in_sectors() as usize {
             println!(
-                "Error: sectors read != file.size, {} != {}, {}",
+                "Error: sectors read != file.size, {} != {}",
                 sectors_read,
                 file.size_in_sectors(),
-                self.bpb.bytes_per_cluster()
             );
             Err(FatError::FileReadError)
             //Ok(())
@@ -667,7 +668,7 @@ impl Cluster {
 
 struct FileIter<'a, D> {
     disk: &'a mut D,
-    current_cluster: u32,
+    current_entry: FatEntry,
     bpb: &'a Bpb,
     fat_table: FileAllocationTable,
 }
@@ -676,10 +677,10 @@ impl<'a, D> FileIter<'a, D>
 where
     D: Read + Seek,
 {
-    fn new(disk: &'a mut D, current_cluster: u32, bpb: &'a Bpb) -> Self {
+    fn new(disk: &'a mut D, start_cluster: u32, bpb: &'a Bpb) -> Self {
         FileIter {
             disk,
-            current_cluster,
+            current_entry: FatEntry::Cluster(start_cluster),
             bpb,
             fat_table: FileAllocationTable::new(
                 bpb.fat_type(),
@@ -690,15 +691,17 @@ where
     }
 
     fn next_cluster(&mut self) -> Result<Option<Cluster>, FatError> {
-        match self.fat_table.get_entry(self.disk, self.current_cluster) {
+        match self.current_entry {
             FatEntry::BadCluster | FatEntry::ReservedCluster => Err(FatError::FileReadError),
             FatEntry::EndOfFile => Ok(None),
             FatEntry::Cluster(cluster_number) => {
                 let cluster = Cluster::new(
-                    self.bpb.first_cluster_sector(self.current_cluster),
+                    self.bpb.first_cluster_sector(cluster_number),
                     self.bpb.sectors_per_cluster,
                 );
-                self.current_cluster = cluster_number;
+
+                self.current_entry = self.fat_table.get_entry(self.disk, cluster_number);
+
                 Ok(Some(cluster))
             }
         }

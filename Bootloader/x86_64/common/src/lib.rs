@@ -3,8 +3,6 @@
 use core::arch::asm;
 use core::panic::PanicInfo;
 
-use vesa::VesaModeInfo;
-
 pub mod dap;
 pub mod disk;
 pub mod fat;
