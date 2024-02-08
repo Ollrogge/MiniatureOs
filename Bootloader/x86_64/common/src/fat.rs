@@ -8,7 +8,7 @@
 //!
 //! Basically just a big single-linked list of clusters in a big table
 //! https://wiki.osdev.org/FAT
-use crate::disk::{Read, Seek, SeekFrom};
+use crate::disk::{Read, Seek, SeekFrom, CLUSTER_SIZE};
 use crate::{
     disk::{self, SECTOR_SIZE},
     print, println,
@@ -480,11 +480,11 @@ impl<D: Read + Seek + Clone> FileSystem<D> {
     /// be adjacent to each other. We obtain the sector number of the first cluster
     /// from the DirectoryEntry. Afterwards we look up the start sectory of any further
     /// clusters by querying the FAT.
-    pub fn try_load_file(&mut self, name: &str, dest: *mut u8) -> Result<(), FatError> {
+    pub fn try_load_file(&mut self, name: &str, dest: *mut u8) -> Result<usize, FatError> {
         let file = self
             .find_file_in_root_dir(name)
             .ok_or(FatError::FileNotFound)?;
-        let mut buffer = [0u8; SECTOR_SIZE];
+        let mut buffer = [0u8; CLUSTER_SIZE];
 
         let mut disk = self.disk.clone();
 
@@ -493,16 +493,14 @@ impl<D: Read + Seek + Clone> FileSystem<D> {
             let cluster = cluster?;
             disk.seek(SeekFrom::Start(u64::from(cluster.start_sector)));
 
-            for _ in 0..cluster.size_in_sectors {
-                disk.read_exact(&mut buffer);
+            disk.read_exact(&mut buffer);
+            let dest = dest.wrapping_add(sectors_read * SECTOR_SIZE);
 
-                let dest = dest.wrapping_add(sectors_read * SECTOR_SIZE);
-                sectors_read += 1;
-
-                unsafe {
-                    ptr::copy_nonoverlapping(buffer.as_ptr(), dest, buffer.len());
-                }
+            unsafe {
+                ptr::copy_nonoverlapping(buffer.as_ptr(), dest, buffer.len());
             }
+
+            sectors_read += 2;
         }
 
         // smaller and not equal because we read cluster wise and therefore
@@ -515,7 +513,7 @@ impl<D: Read + Seek + Clone> FileSystem<D> {
             );
             Err(FatError::FileReadError)
         } else {
-            Ok(())
+            Ok(file.size as usize)
         }
     }
 

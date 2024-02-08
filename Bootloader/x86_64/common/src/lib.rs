@@ -25,14 +25,6 @@ pub fn hlt() {
     }
 }
 
-#[panic_handler]
-pub fn panic(info: &PanicInfo) -> ! {
-    println!("{}", info);
-    loop {
-        hlt();
-    }
-}
-
 #[no_mangle]
 pub extern "C" fn fail(code: u8) -> ! {
     panic!("Fail called with code: {:x}", code);

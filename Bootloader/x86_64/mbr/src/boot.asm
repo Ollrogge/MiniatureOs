@@ -22,7 +22,8 @@ _start:
     mov sp, 0x7c00
 
 # https://wiki.osdev.org/A20_Line
-# need to enable A20 line to access more than 1MB of memory
+# need to enable A20 (address line 20) line to access more than 1MB of memory
+# represents 21st bit of any memory access
 enable_a20:
     in al, 0x92
     test al, 0x2

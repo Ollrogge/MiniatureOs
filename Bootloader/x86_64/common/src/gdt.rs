@@ -10,8 +10,8 @@ bitflags! {
         const READ_WRITE = 1 << 41;
         const CONFORMING = 1 << 42;
         const EXECUTABLE = 1 << 43;
-        /// Type of segment: if set then user segment (64 bit), else kernel segment (128 bit)
-        const USER_SEGMENT = 1 << 44;
+        /// Descriptor type. clear = system segment, set = code or data
+        const CODE_OR_DATA = 1 << 44;
         /// Entry refers to valid segment
         const PRESENT = 1 << 47;
         /// Set if descriptor defines a 64-bit code segment
@@ -49,7 +49,7 @@ impl SegmentDescriptor {
         let flags = SegmentDescriptorFlags::READ_WRITE
             | SegmentDescriptorFlags::EXECUTABLE
             | SegmentDescriptorFlags::PRESENT
-            | SegmentDescriptorFlags::USER_SEGMENT
+            | SegmentDescriptorFlags::CODE_OR_DATA
             | SegmentDescriptorFlags::PROTECTED_MODE
             | SegmentDescriptorFlags::GRANULARITY;
 
@@ -59,7 +59,7 @@ impl SegmentDescriptor {
     pub fn protected_mode_data_segment() -> SegmentDescriptor {
         let flags = SegmentDescriptorFlags::READ_WRITE
             | SegmentDescriptorFlags::PRESENT
-            | SegmentDescriptorFlags::USER_SEGMENT
+            | SegmentDescriptorFlags::CODE_OR_DATA
             | SegmentDescriptorFlags::PROTECTED_MODE
             | SegmentDescriptorFlags::GRANULARITY;
 

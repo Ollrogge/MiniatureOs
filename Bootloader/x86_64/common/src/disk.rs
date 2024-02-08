@@ -23,7 +23,9 @@ pub struct DiskAccess {
     pub offset: u64,
 }
 
+// TODO: dont harcode
 pub const SECTOR_SIZE: usize = 512;
+pub const CLUSTER_SIZE: usize = 2 * SECTOR_SIZE;
 
 impl DiskAccess {
     pub fn new(disk_number: u8, base_lba: u64, offset: u64) -> DiskAccess {
