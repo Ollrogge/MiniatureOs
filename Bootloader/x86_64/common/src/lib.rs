@@ -1,7 +1,6 @@
 #![no_std]
 #![no_main]
 use core::arch::asm;
-use core::panic::PanicInfo;
 
 pub mod dap;
 pub mod disk;
@@ -9,8 +8,7 @@ pub mod fat;
 pub mod gdt;
 pub mod mbr;
 pub mod memory_map;
-pub mod print;
-pub mod vesa;
+pub mod uart;
 
 #[macro_export]
 macro_rules! const_assert {

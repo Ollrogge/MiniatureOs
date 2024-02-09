@@ -8,11 +8,8 @@
 //!
 //! Basically just a big single-linked list of clusters in a big table
 //! https://wiki.osdev.org/FAT
+use crate::disk::{self, SECTOR_SIZE};
 use crate::disk::{Read, Seek, SeekFrom, CLUSTER_SIZE};
-use crate::{
-    disk::{self, SECTOR_SIZE},
-    print, println,
-};
 use core::{default::Default, ptr, str};
 
 const ROOT_DIR_ENTRY_SIZE: usize = 0x20;
@@ -360,15 +357,6 @@ pub struct NormalDirectoryEntry {
     size_in_bytes: u32,
 }
 
-impl NormalDirectoryEntry {
-    pub fn print_filename(&self) {
-        for c in self.filename.iter() {
-            print!("{}", c);
-        }
-        print!("\r\n");
-    }
-}
-
 /// Long name directory entires are used only when the VFAT extension is supported.
 /// With this extension, filenames can be up to 255 characters.
 /// Long name directory entries are represented by a chain of 32 byte long file name entries,
@@ -382,15 +370,6 @@ pub struct LongNameDirectoryEntry {
     pub first_cluster_number: u32,
     attributes: FileAttributes,
     size_in_bytes: u32,
-}
-
-impl LongNameDirectoryEntry {
-    pub fn print_filename(&self) {
-        for c in self.filename.iter() {
-            print!("{}", c);
-        }
-        print!("\r\n");
-    }
 }
 
 impl Default for LongNameDirectoryEntry {
@@ -506,11 +485,6 @@ impl<D: Read + Seek + Clone> FileSystem<D> {
         // smaller and not equal because we read cluster wise and therefore
         // might read more sectors than the size of the file
         if sectors_read < file.size_in_sectors() as usize {
-            println!(
-                "Error: sectors read != file.size, {} != {}",
-                sectors_read,
-                file.size_in_sectors(),
-            );
             Err(FatError::FileReadError)
         } else {
             Ok(file.size as usize)

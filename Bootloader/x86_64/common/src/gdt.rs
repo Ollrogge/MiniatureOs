@@ -6,6 +6,13 @@ use core::arch::asm;
 bitflags! {
     /// Combines the access byte and flags of a segment descriptor
     struct SegmentDescriptorFlags: u64 {
+        /// Accessed bit. The CPU will set it when the segment is accessed
+        /// unless set to 1 in advance.
+        //
+        // This means that in case the GDT descriptor is stored in read only pages
+        // and this bit is set to 0, the CPU trying to set this bit will trigger
+        // a page fault. Best left set to 1 unless otherwise needed.
+        const ACCESSED = 1 << 40;
         /// Readable if code segment, read and writable if data segment
         const READ_WRITE = 1 << 41;
         const CONFORMING = 1 << 42;
@@ -51,8 +58,15 @@ impl SegmentDescriptor {
             | SegmentDescriptorFlags::PRESENT
             | SegmentDescriptorFlags::CODE_OR_DATA
             | SegmentDescriptorFlags::PROTECTED_MODE
-            | SegmentDescriptorFlags::GRANULARITY;
+            | SegmentDescriptorFlags::GRANULARITY
+            | SegmentDescriptorFlags::ACCESSED;
 
+        // Base = A 32-bit value containing the linear address where the segment begins.
+        //
+        // Limit = A 20-bit value, tells the maximum addressable unit, either
+        // in 1 byte units, or in 4KiB pages.
+        // Hence, if you choose page granularity and set the Limit value to 0xFFFFF
+        // the segment will span the full 4 GiB address space in 32-bit mode.
         SegmentDescriptor::new(flags, 0xFFFFF, 0)
     }
 
@@ -61,9 +75,32 @@ impl SegmentDescriptor {
             | SegmentDescriptorFlags::PRESENT
             | SegmentDescriptorFlags::CODE_OR_DATA
             | SegmentDescriptorFlags::PROTECTED_MODE
-            | SegmentDescriptorFlags::GRANULARITY;
+            | SegmentDescriptorFlags::GRANULARITY
+            | SegmentDescriptorFlags::ACCESSED;
 
         SegmentDescriptor::new(flags, 0xFFFFF, 0)
+    }
+
+    pub fn long_mode_code_segment() -> SegmentDescriptor {
+        let flags = SegmentDescriptorFlags::READ_WRITE
+            | SegmentDescriptorFlags::EXECUTABLE
+            | SegmentDescriptorFlags::PRESENT
+            | SegmentDescriptorFlags::CODE_OR_DATA
+            | SegmentDescriptorFlags::LONG_MODE
+            | SegmentDescriptorFlags::ACCESSED;
+
+        // 64-bit mode, the Base and Limit values are ignored, each descriptor
+        // covers the entire linear address space regardless of what they are set to.
+        SegmentDescriptor::new(flags, 0, 0)
+    }
+
+    pub fn long_mode_data_segment() -> SegmentDescriptor {
+        let flags = SegmentDescriptorFlags::READ_WRITE
+            | SegmentDescriptorFlags::PRESENT
+            | SegmentDescriptorFlags::CODE_OR_DATA
+            | SegmentDescriptorFlags::ACCESSED;
+
+        SegmentDescriptor::new(flags, 0, 0)
     }
 }
 

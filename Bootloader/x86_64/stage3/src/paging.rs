@@ -145,7 +145,6 @@ fn create_mappings() {
 fn enable_paging() {
     // load level 4 table pointer into cr3 register
     let l4 = PML4T.lock().deref_mut() as *mut PageTable as u32;
-    println!("Test: {:#x}", l4);
     unsafe { asm!("mov cr3, {0}", in(reg) l4) };
 
     // enable PAE-flag in cr4 (Physical Address Extension)

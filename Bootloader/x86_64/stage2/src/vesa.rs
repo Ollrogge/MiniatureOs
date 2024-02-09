@@ -4,7 +4,8 @@
 //! specification for standard software access to graphics display controllers
 //! which support resolutions, color depths, and frame buffer organizations
 //! beyond the VGA hardware standard
-use crate::{const_assert, println, BiosFramebufferInfo, PixelFormat, Region};
+use crate::println;
+use common::{const_assert, BiosFramebufferInfo, PixelFormat, Region};
 use core::{arch::asm, default::Default, mem::size_of};
 
 #[derive(Debug, Clone, Copy)]

@@ -479,6 +479,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "stage4"
+version = "0.1.0"
+dependencies = [
+ "common",
+]
+
+[[package]]
 name = "syn"
 version = "2.0.48"
 source = "registry+https://github.com/rust-lang/crates.io-index"

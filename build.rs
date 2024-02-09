@@ -121,6 +121,36 @@ fn build_stage3() -> Result<PathBuf> {
     Ok(elf_file.with_extension("bin"))
 }
 
+fn build_stage4() -> Result<PathBuf> {
+    let path: &Path = Path::new("Bootloader/x86_64/stage4");
+    let mut command = Command::new("cargo");
+    command
+        .arg("+nightly")
+        .args(["install", "--path", path.to_str().unwrap()])
+        .args([
+            "--target",
+            path.join("x86-stage4.json")
+                .to_str()
+                .context("Unable to construct target path")?,
+        ])
+        .args([
+            "-Zbuild-std=core",
+            "-Zbuild-std-features=compiler-builtins-mem",
+        ])
+        .args(["--profile", "stage4"]);
+
+    let status = command.status()?;
+
+    if !status.success() {
+        return Err(anyhow!("failed to run install on mbr"));
+    }
+
+    let elf_file = Path::new("target/x86-stage4/stage4/stage4");
+    convert_elf_to_bin(&elf_file)?;
+
+    Ok(elf_file.with_extension("bin"))
+}
+
 fn create_fat_filesystem(files: Vec<(&str, &Path)>, out_path: &Path) -> Result<()> {
     let mut fat_file = fs::OpenOptions::new()
         .read(true)
@@ -167,6 +197,7 @@ fn create_mbr_disk(
     mbr_path: &Path,
     second_stage_path: &Path,
     third_stage_path: &Path,
+    fourth_stage_path: &Path,
     out_path: &Path,
 ) -> Result<()> {
     let mut mbr_file = File::open(&mbr_path).context("Failed to open mbr bin file")?;
@@ -216,7 +247,7 @@ fn create_mbr_disk(
     io::copy(&mut second_stage, &mut disk)
         .context("failed to copy second stage binary to MBR disk image")?;
 
-    let fat_files = vec![("stage3", third_stage_path)];
+    let fat_files = vec![("stage3", third_stage_path), ("stage4", fourth_stage_path)];
     let mut boot_partition = NamedTempFile::new().context("Unable to create temp file")?;
     create_fat_filesystem(fat_files, boot_partition.path())?;
 
@@ -265,9 +296,17 @@ fn bios_main() {
     let mbr_path = build_mbr().unwrap();
     let stage2_path = build_stage2().unwrap();
     let stage3_path = build_stage3().unwrap();
+    let stage4_path = build_stage4().unwrap();
     let disk_path = Path::new("disk_image.img");
 
-    create_mbr_disk(&mbr_path, &stage2_path, &stage3_path, &disk_path).unwrap();
+    create_mbr_disk(
+        &mbr_path,
+        &stage2_path,
+        &stage3_path,
+        &stage4_path,
+        &disk_path,
+    )
+    .unwrap();
 
     // Run the bios build commands concurrently.
     // (Cargo already uses multiple threads for building dependencies, but these

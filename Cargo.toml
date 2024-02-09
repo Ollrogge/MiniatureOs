@@ -25,7 +25,9 @@ members = [
     "Kernel",
     "Bootloader/x86_64/mbr",
     "Bootloader/x86_64/stage2",
-    "Bootloader/x86_64/common", "Bootloader/x86_64/stage3",
+    "Bootloader/x86_64/common",
+    "Bootloader/x86_64/stage3",
+    "Bootloader/x86_64/stage4",
 ]
 
 [profile.mbr]
@@ -44,6 +46,11 @@ debug = false
 overflow-checks = true
 
 [profile.stage3]
+inherits = "release"
+debug = true
+overflow-checks = true
+
+[profile.stage-4]
 inherits = "release"
 debug = true
 overflow-checks = true

@@ -2,18 +2,24 @@
 //! Cant use BIOS functions anymore so need a small UART driver for text output
 #![no_std]
 #![no_main]
-use common::{hlt, BiosInfo};
+use common::{gdt::*, hlt, BiosInfo};
 use core::arch::asm;
 use core::fmt::Write;
 use core::panic::PanicInfo;
-use core::ptr::write_volatile;
+use lazy_static::lazy_static;
 
 mod mutex;
 mod paging;
 mod print;
-mod uart;
 
-// Can not use any BIOS functions anymore since we are in protected mode.
+lazy_static! {
+    static ref GDT: GlobalDescriptorTable = {
+        let mut gdt = GlobalDescriptorTable::new();
+        gdt.add_entry(SegmentDescriptor::long_mode_code_segment());
+        gdt.add_entry(SegmentDescriptor::long_mode_data_segment());
+        gdt
+    };
+}
 
 #[panic_handler]
 pub fn panic(info: &PanicInfo) -> ! {
@@ -32,7 +38,7 @@ pub extern "C" fn _start(info: &BiosInfo) -> ! {
 fn start(info: &BiosInfo) -> ! {
     println!("\nStage3");
     paging::init();
-    println!("Paging enabled and I am alive ?");
+    GDT.clear_interrupts_and_load();
     loop {
         hlt();
     }

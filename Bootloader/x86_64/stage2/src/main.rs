@@ -8,9 +8,7 @@
 #![no_main]
 use common::mbr::PARTITION_TABLE_ENTRY_COUNT;
 use common::memory_map::{E820MemoryRegion, MemoryMap};
-use common::{
-    disk, fail, fat, hlt, mbr, memory_map, println, vesa, BiosFramebufferInfo, BiosInfo, Region,
-};
+use common::{disk, fail, fat, hlt, mbr, memory_map, BiosFramebufferInfo, BiosInfo, Region};
 
 use core::any::Any;
 use core::borrow::Borrow;
@@ -18,17 +16,16 @@ use core::panic::PanicInfo;
 use core::{arch::asm, slice};
 use lazy_static::lazy_static;
 
+mod print;
 mod protected_mode;
+mod vesa;
 use protected_mode::*;
 
 // 1 MiB
 /// Basically the memory region we can use
 const STAGE3_DST: *mut u8 = 0x0010_0000 as *mut u8;
 
-use common::{
-    gdt::{GlobalDescriptorTable, SegmentDescriptor},
-    print,
-};
+use common::gdt::{GlobalDescriptorTable, SegmentDescriptor};
 
 lazy_static! {
     static ref GDT: GlobalDescriptorTable = {
