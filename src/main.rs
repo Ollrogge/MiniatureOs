@@ -1,21 +1,16 @@
-use std::process::Command;
-
 fn main() {
-    let mut command = Command::new("qemu-system-x86_64");
+    // read env variables that were set in build script
+    let bios_path = env!("BIOS_PATH");
 
-    /*
-    const QEMU_ARGS: &[&str] = &["-serial", "stdio", "-display", "none", "--no-reboot"];
-    command
-        .args(["-drive", "format=raw,file=disk_image.img"])
-        .args(QEMU_ARGS);
-    */
+    let mut cmd = std::process::Command::new("qemu-system-x86_64");
+    cmd.arg("-drive")
+        .arg(format!("format=raw,file={bios_path}"));
+    cmd.arg("-no-reboot");
+    cmd.arg("-nographic");
+    cmd.arg("-monitor").arg("/dev/null");
+    cmd.arg("-enable-kvm");
+    cmd.arg("-s");
 
-    command
-        .args(["-drive", "format=raw,file=disk_image.img"])
-        .arg("-s")
-        .arg("-no-reboot")
-        .arg("-nographic")
-        .args(["-monitor", "/dev/null"]);
-
-    command.status().unwrap();
+    let mut child = cmd.spawn().unwrap();
+    child.wait().unwrap();
 }

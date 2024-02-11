@@ -1,0 +1,31 @@
+[package]
+name = "bootloader"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+default = ["bios"]
+bios= []
+
+[build-dependencies]
+futures="*"
+anyhow = "*"
+mbrman="*"
+tempfile="*"
+fatfs="*"
+
+[dependencies]
+futures="*"
+anyhow = "*"
+mbrman="*"
+tempfile="*"
+fatfs="*"
+
+[profile.release]
+panic = "abort"
+
+[profile.dev]
+panic = "abort"
+

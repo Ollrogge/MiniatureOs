@@ -5,13 +5,6 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[build-dependencies]
-anyhow="*"
-futures="*"
-mbrman="*"
-tempfile="*"
-fatfs="*"
-
 [profile.release]
 panic = "abort"
 
@@ -20,14 +13,18 @@ panic = "abort"
 
 [dependencies]
 
+[build-dependencies]
+bootloader={path="./bootloader"}
+kernel = {path = "kernel", artifact = "bin", target = "x86_64-unknown-none" }
+
 [workspace]
 members = [
-    "Kernel",
-    "Bootloader/x86_64/mbr",
-    "Bootloader/x86_64/stage2",
-    "Bootloader/x86_64/common",
-    "Bootloader/x86_64/stage3",
-    "Bootloader/x86_64/stage4",
+    "kernel",
+    "bootloader",
+    "bootloader/x86_64/bios/mbr",
+    "bootloader/x86_64/bios/stage2",
+    "bootloader/x86_64/bios/stage3",
+    "bootloader/x86_64/bios/stage4",
 ]
 
 [profile.mbr]
@@ -50,7 +47,7 @@ inherits = "release"
 debug = true
 overflow-checks = true
 
-[profile.stage-4]
+[profile.stage4]
 inherits = "release"
 debug = true
 overflow-checks = true
