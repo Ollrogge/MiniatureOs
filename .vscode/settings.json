@@ -1,8 +1,0 @@
-{
-    "rust-analyzer.linkedProjects": [
-        "./Kernel/Cargo.toml",
-        "./Kernel/Cargo.toml",
-        "./Bootloader/x86_64/mbr/Cargo.toml"
-    ],
-    "rust-analyzer.showUnlinkedFileNotification": false
-}
