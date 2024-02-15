@@ -32,6 +32,7 @@ fn convert_elf_to_bin(filename: &Path) -> Result<()> {
 fn build_mbr() -> Result<PathBuf> {
     let path = Path::new("x86_64/bios/mbr");
     let mut command = Command::new("cargo");
+    println!("cargo:rerun-if-changed={}", path.display());
     command
         .arg("+nightly")
         .args(["install", "--path", path.to_str().unwrap()])
@@ -62,6 +63,7 @@ fn build_mbr() -> Result<PathBuf> {
 fn build_stage2() -> Result<PathBuf> {
     let path = Path::new("x86_64/bios/stage2");
     let mut command = Command::new("cargo");
+    println!("cargo:rerun-if-changed={}", path.display());
     command
         .arg("+nightly")
         .args(["install", "--path", path.to_str().unwrap()])
@@ -92,6 +94,7 @@ fn build_stage2() -> Result<PathBuf> {
 fn build_stage3() -> Result<PathBuf> {
     let path: &Path = Path::new("x86_64/bios/stage3");
     let mut command = Command::new("cargo");
+    println!("cargo:rerun-if-changed={}", path.display());
     command
         .arg("+nightly")
         .args(["install", "--path", path.to_str().unwrap()])
@@ -122,6 +125,7 @@ fn build_stage3() -> Result<PathBuf> {
 fn build_stage4() -> Result<PathBuf> {
     let path: &Path = Path::new("x86_64/bios/stage4");
     let mut command = Command::new("cargo");
+    println!("cargo:rerun-if-changed={}", path.display());
     command
         .arg("+nightly")
         .args(["install", "--path", path.to_str().unwrap()])
@@ -152,7 +156,7 @@ fn build_stage4() -> Result<PathBuf> {
 pub fn build_bios() {
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
 
-    eprintln!("Out dir: {:?}", out_dir);
+    println!("Out dir: {:?}", out_dir);
 
     let mbr_path = build_mbr().unwrap();
     let stage2_path = build_stage2().unwrap();

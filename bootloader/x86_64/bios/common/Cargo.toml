@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 bitflags = "*"
 bit_field = "*"
+x86_64 = {path="../../../../x86_64"}

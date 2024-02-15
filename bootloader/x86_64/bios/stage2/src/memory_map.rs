@@ -1,34 +1,12 @@
 //! Memory information
 //! https://wiki.osdev.org/Detecting_Memory_(x86)#Getting_an_E820_Memory_Map (c code)
+use common::E820MemoryRegion;
 use core::{arch::asm, convert::AsRef, mem::size_of};
-
-#[allow(dead_code)]
-#[derive(Default, Clone, Copy, Debug)]
-#[repr(u32)]
-pub enum E820MemoryRegionType {
-    #[default]
-    None,
-    Normal,
-    Reserved,
-    AcpiReclaimable,
-    AcpiNvs,
-    Unusable,
-}
-
-/// Memory information returned by BIOS 0xe820 command
-#[derive(Default, Clone, Copy)]
-#[repr(C)]
-pub struct E820MemoryRegion {
-    pub start: u64,
-    pub length: u64,
-    pub typ: E820MemoryRegionType,
-    pub acpi_extended_attributes: u32,
-}
 
 #[derive(Default)]
 pub struct MemoryMap {
-    map: [E820MemoryRegion; 0x20],
-    size: usize,
+    pub map: [E820MemoryRegion; 0x20],
+    pub size: usize,
 }
 
 impl MemoryMap {

@@ -9,6 +9,7 @@ edition = "2021"
 common = {path="../common"}
 bitflags = "*"
 bit_field = "*"
+x86_64 = {path="../../../../x86_64"}
 
 [dependencies.lazy_static]
 version = "*"

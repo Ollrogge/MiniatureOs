@@ -13,7 +13,7 @@ use tempfile::NamedTempFile;
 const SECTOR_SIZE: u32 = 512;
 
 struct DiskImageBuilder {
-    kernel: PathBuf,
+    kernel_path: PathBuf,
 }
 
 #[cfg(feature = "bios")]
@@ -22,7 +22,7 @@ pub mod bios;
 impl DiskImageBuilder {
     pub fn new(kernel: &Path) -> Self {
         Self {
-            kernel: PathBuf::from(kernel),
+            kernel_path: PathBuf::from(kernel),
         }
     }
 
@@ -99,7 +99,11 @@ impl DiskImageBuilder {
         io::copy(&mut second_stage, &mut disk)
             .context("failed to copy second stage binary to MBR disk image")?;
 
-        let fat_files = vec![("stage3", third_stage_path), ("stage4", fourth_stage_path)];
+        let fat_files = vec![
+            ("stage3", third_stage_path),
+            ("stage4", fourth_stage_path),
+            ("kernel", &self.kernel_path),
+        ];
         let mut boot_partition = NamedTempFile::new().context("Unable to create temp file")?;
         create_fat_filesystem(fat_files, boot_partition.path())?;
 
@@ -139,6 +143,8 @@ impl DiskImageBuilder {
 
 #[cfg(feature = "bios")]
 fn create_fat_filesystem(files: Vec<(&str, &Path)>, out_path: &Path) -> Result<()> {
+    use std::os::unix::fs::MetadataExt;
+
     let mut fat_file = fs::OpenOptions::new()
         .read(true)
         .write(true)

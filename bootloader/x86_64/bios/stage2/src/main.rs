@@ -6,7 +6,8 @@
 //! - Switch to protected mode and jump to stage 3
 #![no_std]
 #![no_main]
-use common::{fail, hlt, mbr, BiosFramebufferInfo, BiosInfo, Region};
+use common::gdt::{GlobalDescriptorTable, SegmentDescriptor};
+use common::{fail, hlt, mbr, BiosFramebufferInfo, BiosInfo, E820MemoryRegion, Region};
 
 use core::panic::PanicInfo;
 use core::slice;
@@ -21,14 +22,13 @@ mod protected_mode;
 mod vesa;
 use protected_mode::*;
 
-use memory_map::{E820MemoryRegion, MemoryMap};
+use memory_map::MemoryMap;
 
 // 1 MiB
 /// Basically the memory region we can use
 const STAGE3_DST: *mut u8 = 0x0010_0000 as *mut u8;
 const STAGE4_DST: *mut u8 = 0x0012_0000 as *mut u8;
-
-use common::gdt::{GlobalDescriptorTable, SegmentDescriptor};
+const KERNEL_DST: *mut u8 = 0x0020_0000 as *mut u8;
 
 lazy_static! {
     static ref GDT: GlobalDescriptorTable = {
@@ -61,7 +61,7 @@ pub extern "C" fn _start(disk_number: u8, partition_table_start: *const u8) -> !
 //  Memory region, start: 0x7fe0000, length: 0x20000, type: Reserved, attributes: 0x0
 //  Memory region, start: 0xfffc0000, length: 0x40000, type: Reserved, attributes: 0x0
 //  Memory region, start: 0xfd00000000, length: 0x300000000, type: Reserved, attributes: 0x0
-fn print_memory_map(map: &memory_map::MemoryMap) {
+fn print_memory_map(map: &MemoryMap) {
     for region in map.iter() {
         println!(
             "Memory region, start: {:#x}, length: {:#x}, type: {:?}, attributes: {:#x} ",
@@ -117,7 +117,16 @@ fn start(disk_number: u8, partition_table_start: *const u8) -> ! {
         STAGE4_DST, stage4_len
     );
 
-    let memory_map = memory_map::MemoryMap::get().expect("Failed to get memory map");
+    let kernel_len = fs
+        .try_load_file("kernel", KERNEL_DST)
+        .expect("Failed to load kernel");
+
+    println!(
+        "Kernel loaded at: {:#p}, size: {:#x}",
+        KERNEL_DST, kernel_len
+    );
+
+    let memory_map = MemoryMap::get().expect("Failed to get memory map");
     print_memory_map(&memory_map);
 
     let vesa_info = vesa::VbeInfo::get().expect("Error getting Vesa info");
@@ -129,11 +138,13 @@ fn start(disk_number: u8, partition_table_start: *const u8) -> ! {
     vesa_info.set_mode(mode).expect("Failed to set vesa mode");
 
     // todo: kernel info
-    let bios_info = BiosInfo::new(
-        Region::new(STAGE4_DST as u64, stage4_len as u64),
-        Region::new(0, 0),
-        mode_info.to_framebuffer_info(),
-    );
+    let bios_info = BiosInfo {
+        stage4: Region::new(STAGE4_DST as u64, stage4_len as u64),
+        kernel: Region::new(KERNEL_DST as u64, kernel_len as u64),
+        framebuffer: mode_info.to_framebuffer_info(),
+        last_physical_address: KERNEL_DST as u64 + kernel_len as u64,
+        memory_map: &memory_map.map[0..memory_map.size],
+    };
 
     enter_protected_mode_and_jump_to_stage3(STAGE3_DST, &bios_info);
 

@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 use core::arch::asm;
+use x86_64::memory::MemoryRegion;
 
 pub mod gdt;
 pub mod mbr;
@@ -38,18 +39,28 @@ impl Region {
 }
 
 #[repr(C)]
-pub struct BiosInfo {
+pub struct BiosInfo<'a> {
     pub stage4: Region,
     pub kernel: Region,
     pub framebuffer: BiosFramebufferInfo,
+    pub last_physical_address: u64,
+    pub memory_map: &'a [E820MemoryRegion],
 }
 
-impl BiosInfo {
-    pub fn new(stage4: Region, kernel: Region, framebuffer: BiosFramebufferInfo) -> BiosInfo {
+impl<'a> BiosInfo<'a> {
+    pub fn new(
+        stage4: Region,
+        kernel: Region,
+        framebuffer: BiosFramebufferInfo,
+        last_physical_address: u64,
+        memory_map: &'a [E820MemoryRegion],
+    ) -> BiosInfo {
         Self {
             stage4,
             kernel,
             framebuffer,
+            last_physical_address,
+            memory_map,
         }
     }
 }
@@ -95,4 +106,45 @@ pub enum PixelFormat {
         green_position: u8,
         blue_position: u8,
     },
+}
+
+#[allow(dead_code)]
+#[derive(Default, Clone, Copy, Debug)]
+#[repr(u32)]
+pub enum E820MemoryRegionType {
+    #[default]
+    None,
+    Normal,
+    Reserved,
+    AcpiReclaimable,
+    AcpiNvs,
+    Unusable,
+}
+
+/// Memory information returned by BIOS 0xe820 command
+#[derive(Default, Clone, Copy)]
+#[repr(C)]
+pub struct E820MemoryRegion {
+    pub start: u64,
+    pub length: u64,
+    pub typ: E820MemoryRegionType,
+    pub acpi_extended_attributes: u32,
+}
+
+impl MemoryRegion for E820MemoryRegion {
+    fn start(&self) -> u64 {
+        self.start
+    }
+
+    fn end(&self) -> u64 {
+        self.start + self.length
+    }
+
+    fn length(&self) -> u64 {
+        self.length
+    }
+
+    fn contains(&self, address: u64) -> bool {
+        self.start() <= address && address <= self.end()
+    }
 }

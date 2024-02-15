@@ -25,6 +25,7 @@ members = [
     "bootloader/x86_64/bios/stage2",
     "bootloader/x86_64/bios/stage3",
     "bootloader/x86_64/bios/stage4",
+    "x86_64",
 ]
 
 [profile.mbr]

@@ -3,3 +3,5 @@ disk_image.img
 .gdb_history
 .gdb_history
 tags
+bios.img
+.gdb_history
