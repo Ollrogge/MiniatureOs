@@ -1,12 +1,11 @@
 #![no_std]
 #![no_main]
 use core::arch::asm;
-use x86_64::memory::MemoryRegion;
+use x86_64::memory::{MemoryRegion, Region};
 
 pub mod gdt;
 pub mod mbr;
 pub mod mutex;
-pub mod uart;
 
 #[macro_export]
 macro_rules! const_assert {
@@ -26,18 +25,7 @@ pub extern "C" fn fail(code: u8) -> ! {
     panic!("Fail called with code: {:x}", code);
 }
 
-#[derive(Clone, Copy)]
-pub struct Region {
-    pub start: u64,
-    pub len: u64,
-}
-
-impl Region {
-    pub fn new(start: u64, len: u64) -> Region {
-        Region { start, len }
-    }
-}
-
+#[derive(Debug)]
 #[repr(C)]
 pub struct BiosInfo<'a> {
     pub stage4: Region,
@@ -65,7 +53,7 @@ impl<'a> BiosInfo<'a> {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 #[repr(C)]
 pub struct BiosFramebufferInfo {
     pub region: Region,
@@ -96,7 +84,7 @@ impl BiosFramebufferInfo {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 #[repr(C)]
 pub enum PixelFormat {
     Rgb,
@@ -122,7 +110,7 @@ pub enum E820MemoryRegionType {
 }
 
 /// Memory information returned by BIOS 0xe820 command
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, Debug)]
 #[repr(C)]
 pub struct E820MemoryRegion {
     pub start: u64,

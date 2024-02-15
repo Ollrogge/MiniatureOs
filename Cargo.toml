@@ -21,6 +21,7 @@ kernel = {path = "kernel", artifact = "bin", target = "x86_64-unknown-none" }
 members = [
     "kernel",
     "bootloader",
+    "bootloader/api",
     "bootloader/x86_64/bios/mbr",
     "bootloader/x86_64/bios/stage2",
     "bootloader/x86_64/bios/stage3",

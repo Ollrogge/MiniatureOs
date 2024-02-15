@@ -27,7 +27,7 @@ where
 {
     pub fn new_starting_at(frame: PhysicalFrame, mut memory_map: Peekable<I>) -> Self {
         while let Some(region) = memory_map.peek() {
-            if region.contains(frame.address.value()) {
+            if region.contains(frame.address.as_u64()) {
                 break;
             }
 
@@ -52,7 +52,7 @@ where
         // Either return the next frame in the current memory region or
         // the first frame of the next memory region
         if let Some(region) = self.memory_map.peek() {
-            if region.contains(next_frame.address.value()) {
+            if region.contains(next_frame.address.as_u64()) {
                 self.current_frame = Some(next_frame);
             } else {
                 self.memory_map.next()?;

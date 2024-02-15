@@ -1,0 +1,5 @@
+{
+    "rust-analyzer.linkedProjects": [
+        "./bootloader/x86_64/bios/stage3/Cargo.toml"
+    ]
+}

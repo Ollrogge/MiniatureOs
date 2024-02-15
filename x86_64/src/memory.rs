@@ -3,6 +3,18 @@ use core::fmt::{Formatter, LowerHex, Result};
 use core::marker::PhantomData;
 use core::ops::{Add, AddAssign};
 
+#[derive(Clone, Copy, Debug)]
+pub struct Region {
+    pub start: u64,
+    pub size: u64,
+}
+
+impl Region {
+    pub fn new(start: u64, len: u64) -> Region {
+        Region { start, size: len }
+    }
+}
+
 pub trait PageSize {
     const SIZE: u64;
 }
@@ -15,7 +27,7 @@ impl PageSize for Size4KiB {
 }
 
 pub trait Address {
-    fn value(&self) -> u64;
+    fn as_u64(&self) -> u64;
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -42,7 +54,7 @@ impl PhysicalAddress {
 }
 
 impl Address for PhysicalAddress {
-    fn value(&self) -> u64 {
+    fn as_u64(&self) -> u64 {
         self.0
     }
 }
@@ -67,6 +79,55 @@ impl LowerHex for PhysicalAddress {
 }
 
 pub struct VirtualAddress(u64);
+
+impl VirtualAddress {
+    pub fn new(address: u64) -> Self {
+        Self(address)
+    }
+
+    pub fn align_down(&self, align: u64) -> PhysicalAddress {
+        let addr = self.0 & (align - 1);
+        PhysicalAddress(addr)
+    }
+
+    pub fn align_up(&self, align: u64) -> PhysicalAddress {
+        let addr = (self.0 + align - 1) & !(align - 1);
+        PhysicalAddress(addr)
+    }
+
+    pub fn inner(&self) -> u64 {
+        self.0
+    }
+
+    pub fn as_mut_ptr<T>(&self) -> *mut T {
+        self.as_u64() as *mut T
+    }
+}
+
+impl Add<u64> for VirtualAddress {
+    type Output = Self;
+    fn add(self, rhs: u64) -> Self::Output {
+        Self(self.0 + rhs)
+    }
+}
+
+impl AddAssign<u64> for VirtualAddress {
+    fn add_assign(&mut self, rhs: u64) {
+        self.0 += rhs;
+    }
+}
+
+impl LowerHex for VirtualAddress {
+    fn fmt(&self, f: &mut Formatter) -> Result {
+        LowerHex::fmt(&self.0, f)
+    }
+}
+
+impl Address for VirtualAddress {
+    fn as_u64(&self) -> u64 {
+        self.0
+    }
+}
 
 pub const PAGE_SIZE: usize = 0x1000;
 

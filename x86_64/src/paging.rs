@@ -1,6 +1,8 @@
 use bitflags::bitflags;
 use core::slice;
 
+use crate::memory::{Address, VirtualAddress};
+
 bitflags! {
     /// Possible flags for a page table entry.
     pub struct PageTableFlags: u64 {
@@ -43,13 +45,20 @@ const PAGE_SIZE: usize = 4096;
 #[derive(Clone, Copy)]
 pub struct PageTableEntry(u64);
 
+impl PageTableEntry {
+    pub fn new(val: u64) -> PageTableEntry {
+        PageTableEntry(val)
+    }
+}
+
 #[repr(align(4096))]
 #[derive(Clone, Copy)]
 pub struct PageTable {
-    entries: [PageTableEntry; TABLE_ENTRY_COUNT],
+    pub entries: [PageTableEntry; TABLE_ENTRY_COUNT],
 }
 
 impl PageTable {
+    pub const SIZE: usize = core::mem::size_of::<Self>();
     pub const fn empty() -> Self {
         Self {
             entries: [PageTableEntry(0); TABLE_ENTRY_COUNT],
@@ -64,3 +73,26 @@ impl PageTable {
         self.entries.iter_mut()
     }
 }
+
+// A Pagetable that assumes that physical memory is mapped at a constant offset
+// in virtual address space
+pub struct OffsetPageTable {
+    inner: PageTable,
+    offset: VirtualAddress,
+}
+
+impl OffsetPageTable {
+    pub fn new(inner: PageTable, offset: VirtualAddress) -> Self {
+        Self { inner, offset }
+    }
+
+    pub fn physical_frame_offset(&self) -> u64 {
+        self.offset.as_u64()
+    }
+}
+
+/// A Pagetable that requires that physical memory is are mapped to some virtual address
+///
+/// In this case the tables don't need to be continuous in memory at a specific offset
+/// from their physical address
+pub struct MappedPageTable {}

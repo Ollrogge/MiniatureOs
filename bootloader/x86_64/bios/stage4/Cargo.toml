@@ -7,7 +7,9 @@ edition = "2021"
 
 [dependencies]
 common = {path="../common"}
+bootloader_api= {path="../../../api"}
 x86_64 = {path="../../../../x86_64"}
+xmas-elf = "*"
 
 [dependencies.lazy_static]
 version = "*"

@@ -8,7 +8,7 @@ fn main() {
     cmd.arg("-no-reboot");
     cmd.arg("-nographic");
     cmd.arg("-monitor").arg("/dev/null");
-    cmd.arg("-enable-kvm");
+    //cmd.arg("-enable-kvm");
     cmd.arg("-s");
 
     let mut child = cmd.spawn().unwrap();
