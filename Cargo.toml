@@ -22,6 +22,7 @@ members = [
     "kernel",
     "bootloader",
     "bootloader/api",
+    "bootloader/x86_64/bios/common",
     "bootloader/x86_64/bios/mbr",
     "bootloader/x86_64/bios/stage2",
     "bootloader/x86_64/bios/stage3",
@@ -53,3 +54,4 @@ overflow-checks = true
 inherits = "release"
 debug = true
 overflow-checks = true
+

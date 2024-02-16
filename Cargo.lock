@@ -136,7 +136,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "common"
+name = "common_bios"
 version = "0.1.0"
 dependencies = [
  "bit_field",
@@ -149,6 +149,17 @@ name = "core-foundation-sys"
 version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06ea2b9bc92be3c2baa9334a323ebca2d6f074ff852cd1d7b11064035cd3868f"
+
+[[package]]
+name = "elfloader"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a7b18d35bf8ec3bac59c3ec29cf1f1b46e764e00b42a9c0c754d06e38e78f3b"
+dependencies = [
+ "bitflags 1.3.2",
+ "log",
+ "xmas-elf",
+]
 
 [[package]]
 name = "errno"
@@ -310,7 +321,8 @@ name = "kernel"
 version = "0.1.0"
 dependencies = [
  "bootloader_api",
- "common",
+ "lazy_static",
+ "x86_64",
 ]
 
 [[package]]
@@ -484,8 +496,9 @@ checksum = "6e63cff320ae2c57904679ba7cb63280a3dc4613885beafb148ee7bf9aa9042d"
 name = "stage2"
 version = "0.1.0"
 dependencies = [
- "common",
+ "common_bios",
  "lazy_static",
+ "x86_64",
 ]
 
 [[package]]
@@ -494,7 +507,7 @@ version = "0.1.0"
 dependencies = [
  "bit_field",
  "bitflags 2.4.2",
- "common",
+ "common_bios",
  "lazy_static",
  "x86_64",
 ]
@@ -504,10 +517,10 @@ name = "stage4"
 version = "0.1.0"
 dependencies = [
  "bootloader_api",
- "common",
+ "common_bios",
+ "elfloader",
  "lazy_static",
  "x86_64",
- "xmas-elf",
 ]
 
 [[package]]
@@ -708,14 +721,15 @@ dependencies = [
 name = "x86_64"
 version = "0.1.0"
 dependencies = [
+ "bit_field",
  "bitflags 2.4.2",
 ]
 
 [[package]]
 name = "xmas-elf"
-version = "0.9.1"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42c49817e78342f7f30a181573d82ff55b88a35f86ccaf07fc64b3008f56d1c6"
+checksum = "8d29b4d8e7beaceb4e77447ba941a7600d23d0319ab52da0461abea214832d5a"
 dependencies = [
  "zero",
 ]

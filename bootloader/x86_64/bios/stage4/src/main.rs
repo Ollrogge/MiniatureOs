@@ -8,7 +8,7 @@ mod print;
 use common::{hlt, BiosInfo};
 use x86_64::{
     frame_allocator::{BumpFrameAllocator, FrameAllocator},
-    memory::{Address, PhysicalAddress, PhysicalFrame, VirtualAddress},
+    memory::{Address, PhysicalAddress, PhysicalFrame, Size4KiB, VirtualAddress},
     paging::PageTable,
 };
 
@@ -49,17 +49,10 @@ fn start(info: &BiosInfo) -> ! {
     // 1:1 mapping
     let kernel_pml4t_address = VirtualAddress::new(frame.address.as_u64());
 
-    unsafe {
-        ptr::copy_nonoverlapping(
-            &PageTable::empty(),
-            kernel_pml4t_address.as_mut_ptr(),
-            PageTable::SIZE,
-        );
-    }
+    let mut kernel_page_table = PageTable::initialize_empty_at_address(kernel_pml4t_address);
+    let kernel_page_table = unsafe { &mut *kernel_page_table };
 
-    let kernel_pml4t = unsafe { &mut *kernel_pml4t_address.as_mut_ptr() };
-
-    elf::map_kernel(kernel_pml4t, info, &mut allocator);
+    elf::map_kernel(kernel_page_table, info, &mut allocator);
 
     // map the kernel and all its sections, do relocations
 

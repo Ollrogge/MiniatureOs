@@ -6,4 +6,5 @@ fn main() {
     bootloader::bios::BiosBoot::new(&kernel_path).create_disk_image(&bios_img);
 
     println!("cargo:rustc-env=BIOS_PATH={}", bios_img.display());
+    println!("cargo:rerun-if-changed=./x86_64/lib.rs");
 }

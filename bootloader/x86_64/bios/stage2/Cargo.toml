@@ -6,7 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-common = {path="../common"}
+common = {package="common_bios",path="../common"}
+x86_64 = {path="../../../../x86_64"}
 
 [dependencies.lazy_static]
 version = "*"

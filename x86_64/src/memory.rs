@@ -1,7 +1,8 @@
+use bit_field::BitField;
 use core::clone::Clone;
 use core::fmt::{Formatter, LowerHex, Result};
 use core::marker::PhantomData;
-use core::ops::{Add, AddAssign};
+use core::ops::{Add, AddAssign, Rem};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Region {
@@ -39,13 +40,17 @@ impl PhysicalAddress {
     }
 
     pub fn align_down(&self, align: u64) -> PhysicalAddress {
-        let addr = self.0 & (align - 1);
+        let addr = self.0 & !(align - 1);
         PhysicalAddress(addr)
     }
 
     pub fn align_up(&self, align: u64) -> PhysicalAddress {
         let addr = (self.0 + align - 1) & !(align - 1);
         PhysicalAddress(addr)
+    }
+
+    pub fn as_mut_ptr<T>(&self) -> *mut T {
+        self.as_u64() as *mut T
     }
 
     pub fn inner(&self) -> u64 {
@@ -78,6 +83,7 @@ impl LowerHex for PhysicalAddress {
     }
 }
 
+#[derive(Clone)]
 pub struct VirtualAddress(u64);
 
 impl VirtualAddress {
@@ -85,22 +91,38 @@ impl VirtualAddress {
         Self(address)
     }
 
-    pub fn align_down(&self, align: u64) -> PhysicalAddress {
+    pub fn align_down(&self, align: u64) -> VirtualAddress {
         let addr = self.0 & (align - 1);
-        PhysicalAddress(addr)
+        VirtualAddress(addr)
     }
 
-    pub fn align_up(&self, align: u64) -> PhysicalAddress {
+    pub fn align_up(&self, align: u64) -> VirtualAddress {
         let addr = (self.0 + align - 1) & !(align - 1);
-        PhysicalAddress(addr)
-    }
-
-    pub fn inner(&self) -> u64 {
-        self.0
+        VirtualAddress(addr)
     }
 
     pub fn as_mut_ptr<T>(&self) -> *mut T {
         self.as_u64() as *mut T
+    }
+
+    pub fn as_ptr<T>(&self) -> *const T {
+        self.as_u64() as *const T
+    }
+
+    pub fn l4_index(&self) -> usize {
+        self.0.get_bits(39..=47) as usize
+    }
+
+    pub fn l3_index(&self) -> usize {
+        self.0.get_bits(30..=38) as usize
+    }
+
+    pub fn l2_index(&self) -> usize {
+        self.0.get_bits(21..=29) as usize
+    }
+
+    pub fn l1_index(&self) -> usize {
+        self.0.get_bits(12..=20) as usize
     }
 }
 
@@ -140,9 +162,13 @@ pub struct PhysicalFrame<S: PageSize = Size4KiB> {
 impl<S: PageSize> PhysicalFrame<S> {
     pub fn at_address(address: PhysicalAddress) -> Self {
         Self {
-            address: address.align_down(PAGE_SIZE as u64),
+            address: address.align_down(S::SIZE),
             size: PhantomData,
         }
+    }
+
+    pub fn start(&self) -> u64 {
+        self.address.as_u64()
     }
 }
 
@@ -157,6 +183,36 @@ impl<S: PageSize> Add<u64> for PhysicalFrame<S> {
 }
 
 impl<S: PageSize> AddAssign<u64> for PhysicalFrame<S> {
+    fn add_assign(&mut self, rhs: u64) {
+        self.address += S::SIZE * rhs;
+    }
+}
+
+pub struct Page<S: PageSize = Size4KiB> {
+    pub address: VirtualAddress,
+    pub size: PhantomData<S>,
+}
+
+impl<S: PageSize> Page<S> {
+    pub fn at_address(address: VirtualAddress) -> Self {
+        Self {
+            address: address.align_down(S::SIZE),
+            size: PhantomData,
+        }
+    }
+}
+
+impl<S: PageSize> Add<u64> for Page<S> {
+    type Output = Self;
+    fn add(self, rhs: u64) -> Self::Output {
+        Self {
+            address: self.address + S::SIZE * rhs,
+            size: PhantomData,
+        }
+    }
+}
+
+impl<S: PageSize> AddAssign<u64> for Page<S> {
     fn add_assign(&mut self, rhs: u64) {
         self.address += S::SIZE * rhs;
     }

@@ -7,7 +7,8 @@
 #![no_std]
 #![no_main]
 use common::gdt::{GlobalDescriptorTable, SegmentDescriptor};
-use common::{fail, hlt, mbr, BiosFramebufferInfo, BiosInfo, E820MemoryRegion, Region};
+use common::{fail, hlt, mbr, BiosFramebufferInfo, BiosInfo, E820MemoryRegion};
+use x86_64::memory::Region;
 
 use core::panic::PanicInfo;
 use core::slice;
@@ -24,8 +25,6 @@ use protected_mode::*;
 
 use memory_map::MemoryMap;
 
-// 1 MiB
-/// Basically the memory region we can use
 const STAGE3_DST: *mut u8 = 0x0010_0000 as *mut u8;
 const STAGE4_DST: *mut u8 = 0x0012_0000 as *mut u8;
 const KERNEL_DST: *mut u8 = 0x0020_0000 as *mut u8;

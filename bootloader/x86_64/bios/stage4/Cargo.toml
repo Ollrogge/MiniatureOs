@@ -6,10 +6,10 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-common = {path="../common"}
 bootloader_api= {path="../../../api"}
 x86_64 = {path="../../../../x86_64"}
-xmas-elf = "*"
+common = {package="common_bios", path="../common"}
+elfloader = "*"
 
 [dependencies.lazy_static]
 version = "*"

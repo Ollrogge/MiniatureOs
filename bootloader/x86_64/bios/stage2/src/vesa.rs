@@ -5,8 +5,9 @@
 //! which support resolutions, color depths, and frame buffer organizations
 //! beyond the VGA hardware standard
 use crate::println;
-use common::{const_assert, BiosFramebufferInfo, PixelFormat, Region};
+use common::{const_assert, BiosFramebufferInfo, PixelFormat};
 use core::{arch::asm, default::Default, mem::size_of};
+use x86_64::memory::Region;
 
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]

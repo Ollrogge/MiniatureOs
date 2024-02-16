@@ -2,6 +2,7 @@ use crate::memory::{Address, MemoryRegion, PhysicalAddress, PhysicalFrame};
 use crate::memory::{PageSize, Size4KiB};
 use core::clone::Clone;
 use core::iter::{Iterator, Peekable};
+use core::panic;
 
 /// A trait for types that can allocate a frame of memory.
 ///
