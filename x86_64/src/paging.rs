@@ -7,7 +7,6 @@ use core::ops::{Index, IndexMut};
 use core::result::Result;
 use core::slice;
 use core::{clone, ptr};
-use std::println;
 
 use crate::frame_allocator::{self, FrameAllocator};
 use crate::memory::{Address, Page, PageSize, PhysicalFrame, Size4KiB, VirtualAddress};
@@ -149,6 +148,15 @@ pub struct FourLevelPageTable<'a> {
     walker: PageTableWalker,
 }
 
+impl<'a> FourLevelPageTable<'a> {
+    pub fn new(pml4t: &'a mut PageTable) -> Self {
+        Self {
+            pml4t,
+            walker: PageTableWalker {},
+        }
+    }
+}
+
 /// This struct only exists to avoid borrowing self twice in the map_to func
 struct PageTableWalker;
 
@@ -211,6 +219,7 @@ impl<'a, 'b> FourLevelPageTable<'a> {
 }
 */
 
+#[derive(Debug)]
 pub enum MappingError {
     FrameAllocationFailed,
     PageAlreadyMapped,

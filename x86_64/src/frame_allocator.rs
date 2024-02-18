@@ -57,10 +57,9 @@ where
                 self.current_frame = Some(next_frame);
             } else {
                 self.memory_map.next()?;
-                self.current_frame = self
-                    .memory_map
-                    .peek()
-                    .map(|region| PhysicalFrame::at_address(PhysicalAddress(region.start())));
+                self.current_frame = self.memory_map.peek().map(|region| {
+                    PhysicalFrame::containing_address(PhysicalAddress::new(region.start()))
+                });
             }
         }
 
