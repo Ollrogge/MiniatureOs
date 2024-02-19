@@ -2,10 +2,11 @@
 //! Cant use BIOS functions anymore so need a small UART driver for text output
 #![no_std]
 #![no_main]
-use common::{gdt::*, hlt, BiosInfo};
+use common::{hlt, BiosInfo};
 use core::arch::asm;
 use core::panic::PanicInfo;
 use lazy_static::lazy_static;
+use x86_64::gdt::{GlobalDescriptorTable, SegmentDescriptor};
 
 mod paging;
 mod print;

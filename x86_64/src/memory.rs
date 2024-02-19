@@ -86,14 +86,14 @@ impl Add<PhysicalAddress> for PhysicalAddress {
 impl Sub<u64> for PhysicalAddress {
     type Output = Self;
     fn sub(self, rhs: u64) -> Self::Output {
-        Self(self.0.saturating_sub(rhs))
+        Self(self.0.checked_sub(rhs).unwrap())
     }
 }
 
 impl Sub<PhysicalAddress> for PhysicalAddress {
     type Output = Self;
     fn sub(self, rhs: PhysicalAddress) -> Self::Output {
-        Self(self.0.saturating_sub(rhs.0))
+        Self(self.0.checked_sub(rhs.0).unwrap())
     }
 }
 
@@ -118,7 +118,7 @@ impl VirtualAddress {
     }
 
     pub fn align_down(&self, align: u64) -> VirtualAddress {
-        let addr = self.0 & (align - 1);
+        let addr = self.0 & !(align - 1);
         VirtualAddress(addr)
     }
 
@@ -156,6 +156,13 @@ impl Add<u64> for VirtualAddress {
     type Output = Self;
     fn add(self, rhs: u64) -> Self::Output {
         Self(self.0 + rhs)
+    }
+}
+
+impl Sub<u64> for VirtualAddress {
+    type Output = Self;
+    fn sub(self, rhs: u64) -> Self::Output {
+        Self(self.0.checked_sub(rhs).unwrap())
     }
 }
 
@@ -206,6 +213,10 @@ impl<S: PageSize> PhysicalFrame<S> {
 
     pub fn start(&self) -> u64 {
         self.address.as_u64()
+    }
+
+    pub fn size(&self) -> usize {
+        S::SIZE as usize
     }
 
     pub fn range_inclusive(
@@ -285,12 +296,42 @@ impl<S: PageSize> Page<S> {
             size: PhantomData,
         }
     }
+    pub fn range_inclusive(start: Page<S>, end: Page<S>) -> PageRangeInclusive<S> {
+        PageRangeInclusive { start, end }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct PageRangeInclusive<S: PageSize = Size4KiB> {
+    pub start: Page<S>,
+    pub end: Page<S>,
+}
+
+impl<S: PageSize> Iterator for PageRangeInclusive<S> {
+    type Item = Page<S>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.start <= self.end {
+            let frame = self.start;
+            self.start += 1;
+            Some(frame)
+        } else {
+            None
+        }
+    }
 }
 
 impl<S: PageSize> Add<u64> for Page<S> {
     type Output = Self;
     fn add(self, rhs: u64) -> Self::Output {
         Page::containing_address(self.address + rhs * S::SIZE)
+    }
+}
+
+impl<S: PageSize> Sub<u64> for Page<S> {
+    type Output = Self;
+    fn sub(self, rhs: u64) -> Self::Output {
+        Page::containing_address(self.address - rhs * S::SIZE)
     }
 }
 

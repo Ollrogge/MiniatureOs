@@ -17,7 +17,7 @@ use x86_64::paging::{FourLevelPageTable, Mapper};
 use x86_64::{frame_allocator::FrameAllocator, memory::Size4KiB};
 
 pub struct KernelLoader<'a, M, A, S> {
-    vbase: u64,
+    virtual_base: u64,
     info: &'a BiosInfo<'a>,
     page_table: &'a mut M,
     frame_allocator: &'a mut A,
@@ -37,7 +37,7 @@ where
         frame_allocator: &'a mut A,
     ) -> Self {
         Self {
-            vbase,
+            virtual_base: vbase,
             info,
             page_table,
             frame_allocator,
@@ -45,7 +45,7 @@ where
         }
     }
 
-    pub fn load_kernel(&mut self, info: &BiosInfo) {
+    pub fn load_kernel(&mut self, info: &BiosInfo) -> VirtualAddress {
         let kernel = unsafe {
             slice::from_raw_parts(info.kernel.start as *const u8, info.kernel.size as usize)
         };
@@ -53,6 +53,8 @@ where
         let kernel_elf = ElfBinary::new(kernel).expect("Unable to parse kernel elf");
 
         kernel_elf.load(self).expect("Can't load the binary?");
+
+        VirtualAddress::new(self.virtual_base + kernel_elf.entry_point())
     }
 }
 
@@ -76,13 +78,17 @@ where
             let start_frame: PhysicalFrame<S> =
                 PhysicalFrame::containing_address(physical_start_address);
 
-            let end_frame: PhysicalFrame<S> =
-                PhysicalFrame::containing_address(physical_start_address + header.file_size());
+            let end_frame: PhysicalFrame<S> = PhysicalFrame::containing_address(
+                physical_start_address + header.file_size() - 1u64,
+            );
 
-            let start_page: Page<S> =
-                Page::containing_address(VirtualAddress::new(self.vbase + header.virtual_addr()));
+            let start_page: Page<S> = Page::containing_address(VirtualAddress::new(
+                self.virtual_base + header.virtual_addr(),
+            ));
 
-            let mut flags = PageTableEntryFlags::WRITABLE;
+            let end_page = Page::containing_address(start_page.address + header.mem_size() - 1u64);
+
+            let mut flags = PageTableEntryFlags::PRESENT;
             if !header.flags().is_execute() {
                 flags |= PageTableEntryFlags::NO_EXECUTE;
             }
@@ -90,26 +96,43 @@ where
                 flags |= PageTableEntryFlags::WRITABLE;
             }
 
-            /* TODO: why do I have to map both the file_size and the mem_size for a .bss section ?  */
-            println!(
-                "Header: mem_sz:{} file_sz:{}, Frame: start:{} end:{}",
-                header.mem_size(),
-                header.file_size(),
-                start_frame,
-                end_frame
-            );
+            if header.file_size() > 0 {
+                for frame in PhysicalFrame::range_inclusive(start_frame, end_frame) {
+                    let offset = frame - start_frame;
+                    let page = start_page + offset / S::SIZE;
+                    self.page_table
+                        .map_to(frame, page, flags, self.frame_allocator)
+                        .expect("Failed to map section");
+                }
+            } else if header.file_size() == 0 && header.mem_size() > 0 {
+                // .bss section handling
+                let frame_cnt = header.mem_size().div_ceil(S::SIZE);
+                let virtual_start_address =
+                    VirtualAddress::new(self.virtual_base + header.offset());
+                for page in Page::range_inclusive(start_page, end_page) {
+                    let frame = self
+                        .frame_allocator
+                        .allocate_frame()
+                        .expect("Failed to allocate frame for .bss");
 
-            for frame in PhysicalFrame::range_inclusive(start_frame, end_frame) {
-                let offset = frame - start_frame;
-                let page = start_page + offset;
-                println!("bla: {:#x}", page.address.as_u64());
-                self.page_table
-                    .map_to(frame, page, flags, self.frame_allocator)
-                    .expect("Failed to map section");
-            }
+                    // zero the frame, (1:1 mapping)
+                    let virtual_address = VirtualAddress::new(frame.address.as_u64());
+                    let slice = unsafe {
+                        slice::from_raw_parts_mut(virtual_address.as_u64() as *mut u8, frame.size())
+                    };
+                    for e in slice.iter_mut() {
+                        *e = 0;
+                    }
 
-            if header.mem_size() > header.file_size() {
-                println!("Test: {}, {}", start_frame, end_frame);
+                    self.page_table
+                        .map_to(frame, page, flags, self.frame_allocator)
+                        .expect("Failed to map .bss section");
+                }
+            } else if header.mem_size() > 0 && header.file_size() > 0 {
+                // .bss that is partially included in ELF ? never seen it
+                unimplemented!(
+                    "Load kernel elf: Section with both mem_size and file size bigger 0"
+                );
             }
         }
 
@@ -117,18 +140,11 @@ where
     }
 
     fn relocate(&mut self, entry: RelocationEntry) -> Result<(), ElfLoaderErr> {
-        println!("Relocate called");
         unimplemented!("No support for relocations right now");
         Ok(())
     }
 
     fn load(&mut self, flags: Flags, base: VAddr, region: &[u8]) -> Result<(), ElfLoaderErr> {
-        let start = self.vbase + base;
-        let end = self.vbase + base + region.len() as u64;
-        println!(
-            "load region into = {:#x} -- {:#x} -- {:#x}",
-            start, end, base
-        );
         Ok(())
     }
 

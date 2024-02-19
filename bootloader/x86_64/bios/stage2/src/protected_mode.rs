@@ -1,20 +1,7 @@
 use crate::GDT;
 use common::BiosInfo;
 use core::arch::asm;
-
-fn set_protected_mode_bit() -> u32 {
-    let mut cr0: u32;
-    unsafe {
-        asm!("mov {:e}, cr0", out(reg) cr0, options(nomem, nostack, preserves_flags));
-    }
-    let cr0_protected = cr0 | 1;
-    write_cr0(cr0_protected);
-    cr0
-}
-
-fn write_cr0(val: u32) {
-    unsafe { asm!("mov cr0, {:e}", in(reg) val, options(nostack, preserves_flags)) };
-}
+use x86_64::register::{Cr0, Cr0Flags};
 
 pub fn enter_unreal_mode() {
     let ds: u16;
@@ -28,7 +15,8 @@ pub fn enter_unreal_mode() {
     GDT.clear_interrupts_and_load();
 
     // set protected mode bit
-    let cr0 = set_protected_mode_bit();
+    let cr0 = Cr0::read_raw();
+    Cr0::update(|val| *val |= Cr0Flags::PROTECTED_MODE_ENABLE);
 
     // load GDT
     // mov descriptor (0x10 / 2) = data segment descriptor to ds and ss
@@ -37,7 +25,7 @@ pub fn enter_unreal_mode() {
     }
 
     // unset protected mode bit again
-    write_cr0(cr0);
+    Cr0::write_raw(cr0);
 
     unsafe {
         asm!("mov ds, {0:x}", in(reg) ds, options(nostack, preserves_flags));
@@ -48,7 +36,7 @@ pub fn enter_unreal_mode() {
 
 pub fn enter_protected_mode_and_jump_to_stage3(entry_point: *const u8, info: &BiosInfo) {
     unsafe {
-        // disable interrupts, set protection enabled bit in cr0
+        // disable interrupts, set protected mode enabled bit in cr0
         asm!("cli", "mov eax, cr0", " or al, 1", " mov cr0, eax");
         asm!(
             // align the stack

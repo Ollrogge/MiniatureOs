@@ -6,8 +6,8 @@
 //! - Switch to protected mode and jump to stage 3
 #![no_std]
 #![no_main]
-use common::gdt::{GlobalDescriptorTable, SegmentDescriptor};
 use common::{fail, hlt, mbr, BiosFramebufferInfo, BiosInfo, E820MemoryRegion};
+use x86_64::gdt::{GlobalDescriptorTable, SegmentDescriptor};
 use x86_64::memory::Region;
 
 use core::panic::PanicInfo;

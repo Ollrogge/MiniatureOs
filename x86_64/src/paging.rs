@@ -229,6 +229,7 @@ pub struct MappedPageTable<'a> {
     pml4t: &'a mut PageTable,
 }
 
+// TODO: make unsafe to mark that these functions are inherently unsafe
 // S = trait wide scope
 pub trait Mapper<S> {
     // A = method wide scope
@@ -242,6 +243,20 @@ pub trait Mapper<S> {
     where
         S: PageSize,
         A: FrameAllocator<S>;
+
+    fn identity_map<A>(
+        &mut self,
+        frame: PhysicalFrame<S>,
+        flags: PageTableEntryFlags,
+        frame_allocator: &mut A,
+    ) -> Result<(), MappingError>
+    where
+        S: PageSize,
+        A: FrameAllocator<S>,
+    {
+        let page = Page::containing_address(VirtualAddress::new(frame.address.as_u64()));
+        self.map_to(frame, page, flags, frame_allocator)
+    }
 }
 
 impl<'a> Mapper<Size4KiB> for FourLevelPageTable<'a> {

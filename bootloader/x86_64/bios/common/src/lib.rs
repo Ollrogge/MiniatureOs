@@ -3,7 +3,6 @@
 use core::arch::asm;
 use x86_64::memory::{MemoryRegion, Region};
 
-pub mod gdt;
 pub mod mbr;
 pub mod mutex;
 
