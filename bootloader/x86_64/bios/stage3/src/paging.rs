@@ -10,11 +10,11 @@
 
 use core::{arch::asm, borrow::BorrowMut, ops::DerefMut, slice};
 
-use crate::println;
 use bitflags::bitflags;
 use common::mutex::Mutex;
 use x86_64::memory::{GiB, MiB};
 use x86_64::paging::{PageTable, PageTableEntry, PageTableEntryFlags};
+use x86_64::println;
 
 static PML4T: Mutex<PageTable> = Mutex::new(PageTable::empty());
 static PDPT: Mutex<PageTable> = Mutex::new(PageTable::empty());

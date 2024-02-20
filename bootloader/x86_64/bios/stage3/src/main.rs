@@ -7,9 +7,9 @@ use core::arch::asm;
 use core::panic::PanicInfo;
 use lazy_static::lazy_static;
 use x86_64::gdt::{GlobalDescriptorTable, SegmentDescriptor};
+use x86_64::println;
 
 mod paging;
-mod print;
 
 lazy_static! {
     static ref GDT: GlobalDescriptorTable = {

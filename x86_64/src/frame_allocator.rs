@@ -77,8 +77,6 @@ where
 
         self.current_frame = next_frame;
 
-        println!("Returned frame: {:#x}", current_frame.address);
-
         Some(current_frame)
     }
 }

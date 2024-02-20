@@ -1,7 +1,7 @@
 #![no_std]
 use x86_64::memory::Region;
 pub struct BootInfo {
-    kernel: Region,
+    pub kernel: Region,
 }
 
 impl BootInfo {

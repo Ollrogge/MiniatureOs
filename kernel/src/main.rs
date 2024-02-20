@@ -18,6 +18,7 @@ pub extern "C" fn _start(info: &'static BootInfo) -> ! {
 }
 
 fn start(info: &'static BootInfo) -> ! {
-    println!("Hello from kernel <3");
+    println!("a");
     loop {}
+    //println!("Hello from kernel <3");
 }

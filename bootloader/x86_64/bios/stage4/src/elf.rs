@@ -4,7 +4,9 @@ use crate::PageTable;
 use common::BiosInfo;
 use core::marker::PhantomData;
 use core::ops::Add;
+use core::ptr;
 use core::slice;
+use elfloader::arch::x86_64::RelocationTypes;
 use elfloader::*;
 use x86_64::frame_allocator;
 use x86_64::memory::Address;
@@ -57,14 +59,23 @@ where
 
         VirtualAddress::new(self.virtual_base + kernel_elf.entry_point())
     }
+
+    // https://dram.page/p/relative-relocs-explained/
+    // Basically means: Please fill in the value of (virtual_base + addend) at offset from base of executable
+    fn handle_relative_relocation(&mut self, entry: RelocationEntry) {
+        let relocated_address = self.virtual_base
+            + entry
+                .addend
+                .expect("Relative relocation with addend value = None");
+
+        // 1:1 mapping
+        let address = VirtualAddress::new(self.info.kernel.start + entry.offset);
+        let ptr = address.as_mut_ptr();
+
+        unsafe { ptr::write(ptr, relocated_address) };
+    }
 }
 
-/*
-load region into = 0xffffffff80000000 -- 0xffffffff80001410
-load region into = 0xffffffff80002410 -- 0xffffffff800067ba
-load region into = 0xffffffff800077c0 -- 0xffffffff80007ed8
-load region into = 0xffffffff80008ed8 -- 0xffffffff80008ed8
-*/
 impl<'a, M, A, S> ElfLoader for KernelLoader<'a, M, A, S>
 where
     M: Mapper<S>,
@@ -76,8 +87,8 @@ where
     fn allocate(&mut self, load_headers: LoadableHeaders) -> Result<(), ElfLoaderErr> {
         for header in load_headers {
             println!(
-                "allocate base = {:#x} size = {:#x} flags = {}",
-                header.virtual_addr(),
+                "Kernel elf: allocate segment at {:#x}, size = {:#x}, flags = {}",
+                header.virtual_addr() + self.virtual_base,
                 header.mem_size(),
                 header.flags()
             );
@@ -161,14 +172,22 @@ where
     }
 
     fn relocate(&mut self, entry: RelocationEntry) -> Result<(), ElfLoaderErr> {
-        unimplemented!("No support for relocations right now");
+        match entry.rtype {
+            RelocationType::x86_64(typ) => match typ {
+                RelocationTypes::R_AMD64_RELATIVE => {
+                    self.handle_relative_relocation(entry);
+                }
+                _ => panic!("Unhandled relocation type: {:?}", typ),
+            },
+            _ => panic!("Expected x86_64 relocation type but got x86 relocation type"),
+        }
         Ok(())
     }
 
     fn load(&mut self, flags: Flags, base: VAddr, region: &[u8]) -> Result<(), ElfLoaderErr> {
         let start = self.virtual_base + base;
         let end = self.virtual_base + base + region.len() as u64;
-        println!("load region into = {:#x} -- {:#x}", start, end);
+        //println!("load region into = {:#x} -- {:#x}", start, end);
         Ok(())
     }
 
