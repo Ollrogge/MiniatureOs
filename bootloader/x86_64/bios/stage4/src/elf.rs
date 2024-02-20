@@ -1,9 +1,9 @@
-use crate::println;
 use crate::start;
 use crate::BumpFrameAllocator;
 use crate::PageTable;
 use common::BiosInfo;
 use core::marker::PhantomData;
+use core::ops::Add;
 use core::slice;
 use elfloader::*;
 use x86_64::frame_allocator;
@@ -14,11 +14,12 @@ use x86_64::memory::VirtualAddress;
 use x86_64::memory::{Page, PageSize};
 use x86_64::paging::PageTableEntryFlags;
 use x86_64::paging::{FourLevelPageTable, Mapper};
+use x86_64::println;
 use x86_64::{frame_allocator::FrameAllocator, memory::Size4KiB};
 
 pub struct KernelLoader<'a, M, A, S> {
     virtual_base: u64,
-    info: &'a BiosInfo<'a>,
+    info: &'a BiosInfo,
     page_table: &'a mut M,
     frame_allocator: &'a mut A,
     _marker: PhantomData<S>,
@@ -58,12 +59,20 @@ where
     }
 }
 
+/*
+load region into = 0xffffffff80000000 -- 0xffffffff80001410
+load region into = 0xffffffff80002410 -- 0xffffffff800067ba
+load region into = 0xffffffff800077c0 -- 0xffffffff80007ed8
+load region into = 0xffffffff80008ed8 -- 0xffffffff80008ed8
+*/
 impl<'a, M, A, S> ElfLoader for KernelLoader<'a, M, A, S>
 where
     M: Mapper<S>,
     A: FrameAllocator<S>,
     S: PageSize,
 {
+    // we just need allocate and not load since we align down the addresses such
+    // that accesses will still work.
     fn allocate(&mut self, load_headers: LoadableHeaders) -> Result<(), ElfLoaderErr> {
         for header in load_headers {
             println!(
@@ -96,10 +105,22 @@ where
                 flags |= PageTableEntryFlags::WRITABLE;
             }
 
+            // TODO: the approach of loading the kernel elf and binary blob into
+            // memory has a potential security problem: This way different segments
+            // can share a physical frame. When mapped to a page with permissions,
+            // the page will then contain data of another segment with different
+            // permissions
+            //
+            // To fix this, one would need to allocate explicit frames in this
+            // section for each segment.
+            //
+            // Cant get around the loading binary blob into memory thing for now ig,
+            // since we only have access to BIOS disk firmware in lower stages
+
             if header.file_size() > 0 {
                 for frame in PhysicalFrame::range_inclusive(start_frame, end_frame) {
                     let offset = frame - start_frame;
-                    let page = start_page + offset / S::SIZE;
+                    let page: Page<S> = start_page + offset;
                     self.page_table
                         .map_to(frame, page, flags, self.frame_allocator)
                         .expect("Failed to map section");
@@ -145,6 +166,9 @@ where
     }
 
     fn load(&mut self, flags: Flags, base: VAddr, region: &[u8]) -> Result<(), ElfLoaderErr> {
+        let start = self.virtual_base + base;
+        let end = self.virtual_base + base + region.len() as u64;
+        println!("load region into = {:#x} -- {:#x}", start, end);
         Ok(())
     }
 

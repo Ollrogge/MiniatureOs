@@ -6,3 +6,4 @@ edition = "2021"
 [dependencies]
 bitflags = "*"
 bit_field = "*"
+lazy_static = "*"

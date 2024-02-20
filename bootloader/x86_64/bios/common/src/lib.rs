@@ -26,28 +26,33 @@ pub extern "C" fn fail(code: u8) -> ! {
 
 #[derive(Debug)]
 #[repr(C)]
-pub struct BiosInfo<'a> {
+pub struct BiosInfo {
     pub stage4: Region,
     pub kernel: Region,
     pub framebuffer: BiosFramebufferInfo,
     pub last_physical_address: u64,
-    pub memory_map: &'a [E820MemoryRegion],
+    // cant pass a pointer here since it will be corrupted when switching
+    // from protected to long mode since pointer size differs
+    pub memory_map_address: u64,
+    pub memory_map_size: u64,
 }
 
-impl<'a> BiosInfo<'a> {
+impl BiosInfo {
     pub fn new(
         stage4: Region,
         kernel: Region,
         framebuffer: BiosFramebufferInfo,
         last_physical_address: u64,
-        memory_map: &'a [E820MemoryRegion],
+        memory_map_address: u64,
+        memory_map_size: u64,
     ) -> BiosInfo {
         Self {
             stage4,
             kernel,
             framebuffer,
             last_physical_address,
-            memory_map,
+            memory_map_address,
+            memory_map_size,
         }
     }
 }
@@ -96,7 +101,7 @@ pub enum PixelFormat {
 }
 
 #[allow(dead_code)]
-#[derive(Default, Clone, Copy, Debug)]
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
 pub enum E820MemoryRegionType {
     #[default]
@@ -118,6 +123,17 @@ pub struct E820MemoryRegion {
     pub acpi_extended_attributes: u32,
 }
 
+impl E820MemoryRegion {
+    pub const fn empty() -> Self {
+        Self {
+            start: 0,
+            length: 0,
+            typ: E820MemoryRegionType::Unusable,
+            acpi_extended_attributes: 0,
+        }
+    }
+}
+
 impl MemoryRegion for E820MemoryRegion {
     fn start(&self) -> u64 {
         self.start
@@ -133,5 +149,9 @@ impl MemoryRegion for E820MemoryRegion {
 
     fn contains(&self, address: u64) -> bool {
         self.start() <= address && address <= self.end()
+    }
+
+    fn usable(&self) -> bool {
+        self.typ == E820MemoryRegionType::Normal
     }
 }

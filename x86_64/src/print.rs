@@ -2,7 +2,7 @@ use crate::mutex::Mutex;
 use core::fmt;
 use lazy_static::lazy_static;
 
-use x86_64::uart::*;
+use crate::uart::*;
 
 lazy_static! {
     pub static ref SERIAL: Mutex<SerialPort> = {

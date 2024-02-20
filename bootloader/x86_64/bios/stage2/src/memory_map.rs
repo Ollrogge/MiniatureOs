@@ -1,7 +1,15 @@
 //! Memory information
 //! https://wiki.osdev.org/Detecting_Memory_(x86)#Getting_an_E820_Memory_Map (c code)
-use common::E820MemoryRegion;
-use core::{arch::asm, convert::AsRef, mem::size_of};
+use common::{
+    mutex::{Mutex, MutexGuard},
+    E820MemoryRegion,
+};
+use core::{arch::asm, convert::AsRef, mem::size_of, ops::Deref, ops::DerefMut};
+
+pub static MEMORY_MAP: Mutex<MemoryMap> = Mutex::new(MemoryMap {
+    map: [E820MemoryRegion::empty(); 0x20],
+    size: 0,
+});
 
 #[derive(Default)]
 pub struct MemoryMap {
@@ -10,13 +18,14 @@ pub struct MemoryMap {
 }
 
 impl MemoryMap {
-    pub fn get() -> Result<MemoryMap, ()> {
-        let mut obj = Self::default();
+    pub fn get() -> Result<MutexGuard<'static, MemoryMap>, ()> {
         const MAGIC_NUMBER: u32 = 0x534D4150;
         let mut offset = 0x0;
         let mut signature = MAGIC_NUMBER;
         let mut len = 0x0;
         let mut entries = 0x0;
+
+        let mut memory_map = MEMORY_MAP.lock();
 
         loop {
             unsafe {
@@ -26,7 +35,7 @@ impl MemoryMap {
                     inout("ecx") size_of::<E820MemoryRegion>() => len,
                     inout("ebx") offset,
                     in("edx") MAGIC_NUMBER,
-                    in("edi") &obj.map[offset],
+                    in("edi") &memory_map.map[entries],
                     options(nostack)
                 );
             }
@@ -35,7 +44,7 @@ impl MemoryMap {
                 return Err(());
             }
 
-            let entry = &obj.map[entries];
+            let entry = &mut memory_map.map[entries];
 
             if len > 0x20 && (entry.acpi_extended_attributes & 0x1) == 0 {
                 continue;
@@ -48,9 +57,9 @@ impl MemoryMap {
             }
         }
 
-        obj.size = entries;
+        memory_map.size = entries;
 
-        Ok(obj)
+        Ok(memory_map)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &E820MemoryRegion> {

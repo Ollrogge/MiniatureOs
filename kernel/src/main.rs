@@ -2,9 +2,7 @@
 #![no_main]
 use bootloader_api::BootInfo;
 use core::panic::PanicInfo;
-
-mod mutex;
-mod print;
+use x86_64::println;
 
 static mut TEST: [u8; 0xabc123] = [0; 0xabc123];
 

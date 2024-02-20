@@ -13,6 +13,7 @@ use core::{arch::asm, borrow::BorrowMut, ops::DerefMut, slice};
 use crate::println;
 use bitflags::bitflags;
 use common::mutex::Mutex;
+use x86_64::memory::{GiB, MiB};
 use x86_64::paging::{PageTable, PageTableEntry, PageTableEntryFlags};
 
 static PML4T: Mutex<PageTable> = Mutex::new(PageTable::empty());
@@ -42,11 +43,12 @@ fn create_mappings() {
     l4.entries[0] = PageTableEntry::new(l3.deref_mut().as_u64() | flags.bits());
     for (i, l2) in l2.iter_mut().enumerate() {
         l3.entries[i] = PageTableEntry::new(l2.as_u64() | flags.bits());
-        let offset = u64::try_from(i).unwrap() * 1024 * 1024 * 1024;
+        // 1 l2 table = 1 GiB of Memory (512 * 2 MiB huge pages)
+        let offset = u64::try_from(i).unwrap() * (1 * GiB as u64);
         for (j, entry) in l2.entries.iter_mut().enumerate() {
             // map huge pages
             *entry = PageTableEntry::new(
-                (offset + u64::try_from(j).unwrap() * (2 * 1024 * 1024))
+                (offset + u64::try_from(j).unwrap() * (2 * MiB as u64))
                     | flags.bits()
                     | PageTableEntryFlags::HUGE_PAGE.bits(),
             )

@@ -1,9 +1,11 @@
 use crate::memory::{Address, MemoryRegion, PhysicalAddress, PhysicalFrame};
 use crate::memory::{PageSize, Size4KiB};
+use core::any::Any;
 use core::clone::Clone;
 use core::iter::{Iterator, Peekable};
 use core::panic;
 
+use crate::println;
 /// A trait for types that can allocate a frame of memory.
 ///
 /// # Safety
@@ -16,52 +18,66 @@ pub unsafe trait FrameAllocator<S: PageSize> {
     fn allocate_frame(&mut self) -> Option<PhysicalFrame<S>>;
 }
 
-pub struct BumpFrameAllocator<I: Iterator> {
-    memory_map: Peekable<I>,
-    current_frame: Option<PhysicalFrame>,
+pub struct BumpFrameAllocator<I: Iterator, D: MemoryRegion> {
+    memory_map: I,
+    current_region: Option<D>,
+    current_frame: PhysicalFrame,
 }
 
-impl<I, D> BumpFrameAllocator<I>
+impl<I, D> BumpFrameAllocator<I, D>
 where
     I: Iterator<Item = D>,
     D: MemoryRegion,
 {
-    pub fn new_starting_at(frame: PhysicalFrame, mut memory_map: Peekable<I>) -> Self {
-        while let Some(region) = memory_map.peek() {
+    pub fn new_starting_at(frame: PhysicalFrame, mut memory_map: I) -> Self {
+        // todo: this assmumes memory map is sorted
+        let mut current_region = None;
+        while let Some(region) = memory_map.next() {
             if region.contains(frame.address.as_u64()) {
+                if !region.usable() {
+                    panic!("Tried to initialize allocator at unusable address");
+                }
+                current_region = Some(region);
                 break;
             }
-
-            memory_map.next();
         }
         Self {
-            memory_map: memory_map.into(),
-            current_frame: Some(frame),
+            memory_map: memory_map,
+            current_region,
+            current_frame: frame,
         }
     }
 }
 
-unsafe impl<I, D> FrameAllocator<Size4KiB> for BumpFrameAllocator<I>
+unsafe impl<I, D> FrameAllocator<Size4KiB> for BumpFrameAllocator<I, D>
 where
     I: Iterator<Item = D> + Clone,
-    I::Item: MemoryRegion,
+    D: MemoryRegion,
 {
     fn allocate_frame(&mut self) -> Option<PhysicalFrame<Size4KiB>> {
-        let current_frame = self.current_frame?;
-        let next_frame = current_frame + 1;
+        let current_frame = self.current_frame;
+        // Only time we cant find any more frames is when we are out of regions
+        // in this case this will return None
+        let current_region = self.current_region?;
 
-        // Either return the next frame in the current memory region or
-        // the first frame of the next memory region
-        if let Some(region) = self.memory_map.peek() {
-            if region.contains(next_frame.address.as_u64()) {
-                self.current_frame = Some(next_frame);
-            } else {
-                self.memory_map.next()?;
-                self.current_frame = self.memory_map.peek().map(|region| {
-                    PhysicalFrame::containing_address(PhysicalAddress::new(region.start()))
-                });
+        let mut next_frame = current_frame + 1;
+
+        if !current_region.contains(next_frame.address.as_u64()) {
+            while let Some(region) = self.memory_map.next() {
+                if !region.usable() {
+                    continue;
+                }
+
+                next_frame =
+                    PhysicalFrame::containing_address(PhysicalAddress::new(region.start()));
+                self.current_region = Some(region);
+                break;
             }
         }
+
+        self.current_frame = next_frame;
+
+        println!("Returned frame: {:#x}", current_frame.address);
 
         Some(current_frame)
     }

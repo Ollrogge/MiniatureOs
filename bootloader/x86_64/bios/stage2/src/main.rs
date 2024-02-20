@@ -25,6 +25,8 @@ use protected_mode::*;
 
 use memory_map::MemoryMap;
 
+use crate::memory_map::MEMORY_MAP;
+
 const STAGE3_DST: *mut u8 = 0x0010_0000 as *mut u8;
 const STAGE4_DST: *mut u8 = 0x0012_0000 as *mut u8;
 const KERNEL_DST: *mut u8 = 0x0020_0000 as *mut u8;
@@ -142,7 +144,8 @@ fn start(disk_number: u8, partition_table_start: *const u8) -> ! {
         kernel: Region::new(KERNEL_DST as u64, kernel_len as u64),
         framebuffer: mode_info.to_framebuffer_info(),
         last_physical_address: KERNEL_DST as u64 + kernel_len as u64,
-        memory_map: &memory_map.map[0..memory_map.size],
+        memory_map_address: memory_map.map[0..memory_map.size].as_ptr() as u64,
+        memory_map_size: memory_map.size as u64,
     };
 
     enter_protected_mode_and_jump_to_stage3(STAGE3_DST, &bios_info);

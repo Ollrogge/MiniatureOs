@@ -15,6 +15,7 @@ anyhow = "*"
 mbrman="*"
 tempfile="*"
 fatfs="*"
+walkdir="*"
 
 [dependencies]
 futures="*"

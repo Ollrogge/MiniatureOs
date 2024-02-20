@@ -1,3 +1,4 @@
+use crate::println;
 use bit_field::BitField;
 use bitflags::{bitflags, Flags};
 use core::borrow::BorrowMut;
@@ -9,7 +10,9 @@ use core::slice;
 use core::{clone, ptr};
 
 use crate::frame_allocator::{self, FrameAllocator};
-use crate::memory::{Address, Page, PageSize, PhysicalFrame, Size4KiB, VirtualAddress};
+use crate::memory::{
+    Address, Page, PageSize, PhysicalAddress, PhysicalFrame, Size4KiB, VirtualAddress,
+};
 
 bitflags! {
     /// Possible flags for a page table entry.
@@ -51,7 +54,8 @@ bitflags! {
 const TABLE_ENTRY_COUNT: usize = 512;
 const PAGE_SIZE: usize = 4096;
 
-#[derive(Clone, Copy)]
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
 pub struct PageTableEntry(u64);
 
 impl PageTableEntry {
@@ -63,16 +67,33 @@ impl PageTableEntry {
         (self.0 & PageTableEntryFlags::PRESENT.bits()) != 0
     }
 
-    pub fn physical_address(&self) -> u64 {
-        self.0.get_bits(12..48)
+    pub fn is_unused(&self) -> bool {
+        self.0 == 0
+    }
+
+    pub fn physical_address(&self) -> PhysicalAddress {
+        PhysicalAddress::new(self.0.get_bits(12..48) << 12)
+    }
+
+    pub fn physical_frame(&self) -> PhysicalFrame {
+        PhysicalFrame::containing_address(self.physical_address())
     }
 
     pub fn set_frame(&mut self, frame: PhysicalFrame, flags: PageTableEntryFlags) {
         self.0 = frame.address.as_u64() | flags.bits();
     }
+
+    pub fn flags(&self) -> PageTableEntryFlags {
+        PageTableEntryFlags::from_bits_truncate(self.0)
+    }
+
+    pub fn set_flags(&mut self, flags: PageTableEntryFlags) {
+        self.0 = self.0 | flags.bits();
+    }
 }
 
 #[repr(align(4096))]
+#[repr(C)]
 #[derive(Clone, Copy)]
 pub struct PageTable {
     pub entries: [PageTableEntry; TABLE_ENTRY_COUNT],
@@ -99,14 +120,15 @@ impl PageTable {
             address.as_u64() as usize % PageTable::SIZE == 0,
             "Address must be properly aligned"
         );
+        let pt_ptr: *mut PageTable = address.as_u64() as *mut PageTable;
         unsafe {
-            ptr::copy_nonoverlapping(&PageTable::empty(), address.as_mut_ptr(), PageTable::SIZE);
-            &mut *(address.as_u64() as *mut PageTable)
+            ptr::write(pt_ptr, PageTable::empty());
         }
+        pt_ptr
     }
 
     pub fn at_address(address: VirtualAddress) -> *mut PageTable {
-        unsafe { &mut *(address.as_mut_ptr() as *mut PageTable) }
+        address.as_mut_ptr() as *mut PageTable
     }
 
     pub fn as_u64(&mut self) -> u64 {
@@ -174,14 +196,20 @@ impl PageTableWalker {
     where
         A: FrameAllocator<Size4KiB>,
     {
-        let table = if !pagetable_entry.is_present() {
+        let table = if pagetable_entry.is_unused() {
             let frame = allocator.allocate_frame()?;
             pagetable_entry.set_frame(frame, flags);
+
             let virtual_address = VirtualAddress::new(frame.address.as_u64());
             let table = PageTable::initialize_empty_at_address(virtual_address);
             table
         } else {
-            let virtual_address = VirtualAddress::new(pagetable_entry.physical_address());
+            if !flags.is_empty() && !pagetable_entry.flags().contains(flags) {
+                pagetable_entry.set_flags(pagetable_entry.flags() | flags);
+            }
+            let physical_address = pagetable_entry.physical_address();
+            // 1:1
+            let virtual_address = VirtualAddress::new(physical_address.as_u64());
             PageTable::at_address(virtual_address)
         };
 
@@ -190,34 +218,6 @@ impl PageTableWalker {
         Some(table)
     }
 }
-
-/*
-impl<'a, 'b> FourLevelPageTable<'a> {
-    /// Gets the pagetable the passed entry points to or allocates a new table if the
-    /// entry is not present
-    pub fn get_pagetable<A>(
-        &self,
-        pagetable_entry: &'b mut PageTableEntry,
-        allocator: &mut A,
-    ) -> Option<PageTable>
-    where
-        A: FrameAllocator<Size4KiB>,
-    {
-        if !pagetable_entry.is_present() {
-            let frame = allocator.allocate_frame()?;
-            let mut virtual_address = VirtualAddress::new(frame.address.as_u64());
-            let mut table = PageTable::initialize_empty_at_virtual_address(&mut virtual_address);
-            *pagetable_entry = PageTableEntry::new(table.as_u64());
-            Some(table)
-        } else {
-            Some(PageTable::at_address(VirtualAddress::new(
-                pagetable_entry.physical_address(),
-            )))
-        }
-        // if not present -> allocate, else return
-    }
-}
-*/
 
 #[derive(Debug)]
 pub enum MappingError {
@@ -309,23 +309,3 @@ impl<'a> Mapper<Size4KiB> for FourLevelPageTable<'a> {
         }
     }
 }
-
-/*
-pub struct Mapper<'a, A, S> {
-    allocator: &'a mut A,
-    _marker: PhantomData<S>,
-}
-
-impl<'a, A, S> Mapper<'a, A, S>
-where
-    A: FrameAllocator<S>,
-    S: PageSize,
-{
-    pub fn new(frame_allocator: &'a mut A) -> Self {
-        Self {
-            allocator: frame_allocator,
-            _marker: PhantomData,
-        }
-    }
-}
-*/

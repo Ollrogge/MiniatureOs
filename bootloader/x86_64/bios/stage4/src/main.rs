@@ -2,22 +2,21 @@
 //! So close to kernel now :P
 #![no_std]
 #![no_main]
-use core::{arch::asm, panic::PanicInfo, ptr};
+use core::{arch::asm, panic::PanicInfo, ptr, slice};
 mod elf;
-mod print;
-use common::{hlt, BiosInfo};
+use common::{hlt, BiosInfo, E820MemoryRegion};
 use x86_64::{
     frame_allocator::{BumpFrameAllocator, FrameAllocator},
-    memory::{Address, Page, PageSize, PhysicalAddress, PhysicalFrame, Size4KiB, VirtualAddress},
+    memory::{
+        Address, KiB, MemoryRegion, Page, PageSize, PhysicalAddress, PhysicalFrame, Size4KiB,
+        VirtualAddress,
+    },
     paging::{FourLevelPageTable, Mapper, PageTable, PageTableEntryFlags},
+    println,
     register::{Cr0, Cr0Flags, Efer, EferFlags},
 };
 
 use crate::elf::KernelLoader;
-
-pub const MiB: usize = 0x100000;
-pub const KiB: usize = 0x400;
-pub const GiB: usize = 0x40000000;
 
 // hardcoded for now;
 const KERNEL_VIRTUAL_BASE: u64 = 0xffffffff80000000;
@@ -95,10 +94,6 @@ where
 {
     let context_switch_function =
         PhysicalFrame::containing_address(PhysicalAddress::new(context_switch as *const () as u64));
-    println!(
-        "Frame address: {:#x}",
-        context_switch_function.address.as_u64()
-    );
     let flags = PageTableEntryFlags::PRESENT;
     page_table
         .identity_map(context_switch_function, flags, frame_allocator)
@@ -122,10 +117,19 @@ fn start(info: &BiosInfo) -> ! {
     enable_nxe_bit();
     enable_write_protect_bit();
 
-    let mut allocator = BumpFrameAllocator::new_starting_at(
-        PhysicalFrame::containing_address(PhysicalAddress::new(info.last_physical_address)),
-        info.memory_map.iter().copied().peekable(),
-    );
+    let memory_map: &[E820MemoryRegion] = unsafe {
+        slice::from_raw_parts(
+            info.memory_map_address as *const _,
+            info.memory_map_size.try_into().unwrap(),
+        )
+    };
+
+    // +1 to get the next frame after the last frame we allocate data in
+    let next_free_frame =
+        PhysicalFrame::containing_address(PhysicalAddress::new(info.last_physical_address)) + 1;
+
+    let mut allocator =
+        BumpFrameAllocator::new_starting_at(next_free_frame, memory_map.iter().copied().peekable());
 
     let frame = allocator
         .allocate_frame()

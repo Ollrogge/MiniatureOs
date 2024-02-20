@@ -3,6 +3,10 @@ use core::fmt::{self, Display, Formatter, LowerHex, Result};
 use core::marker::PhantomData;
 use core::ops::{Add, AddAssign, Rem, Sub};
 
+pub const KiB: usize = 1024;
+pub const MiB: usize = KiB * 1024;
+pub const GiB: usize = MiB * 1024;
+
 #[derive(Clone, Copy, Debug)]
 pub struct Region {
     pub start: u64,
@@ -19,7 +23,7 @@ pub trait PageSize: Copy + Eq + PartialOrd + Ord {
     const SIZE: u64;
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Debug)]
 pub enum Size4KiB {}
 
 impl PageSize for Size4KiB {
@@ -109,7 +113,7 @@ impl LowerHex for PhysicalAddress {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct VirtualAddress(u64);
 
 impl VirtualAddress {
@@ -191,7 +195,7 @@ impl Address for VirtualAddress {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct PhysicalFrame<S: PageSize = Size4KiB> {
     pub address: PhysicalAddress,
     pub size: PhantomData<S>,
@@ -250,7 +254,7 @@ impl<S: PageSize> Iterator for PhysicalFrameRangeInclusive<S> {
 impl<S: PageSize> Add<u64> for PhysicalFrame<S> {
     type Output = Self;
     fn add(self, rhs: u64) -> Self::Output {
-        PhysicalFrame::containing_address(self.address + S::SIZE * rhs)
+        PhysicalFrame::containing_address(self.address + rhs * S::SIZE)
     }
 }
 
@@ -265,15 +269,14 @@ impl<S: PageSize> Add<PhysicalFrame<S>> for PhysicalFrame<S> {
 impl<S: PageSize> Sub<u64> for PhysicalFrame<S> {
     type Output = Self;
     fn sub(self, rhs: u64) -> Self::Output {
-        PhysicalFrame::containing_address(self.address - S::SIZE * rhs)
+        PhysicalFrame::containing_address(self.address - rhs * S::SIZE)
     }
 }
 
 impl<S: PageSize> Sub<PhysicalFrame<S>> for PhysicalFrame<S> {
     type Output = u64;
     fn sub(self, rhs: PhysicalFrame<S>) -> Self::Output {
-        let res = self.address - rhs.address;
-        res.as_u64()
+        (self.address.as_u64() - rhs.address.as_u64()) / S::SIZE
     }
 }
 
@@ -335,13 +338,10 @@ impl<S: PageSize> Sub<u64> for Page<S> {
     }
 }
 
-impl<S: PageSize> Add<Page<S>> for Page<S> {
-    type Output = Self;
-    fn add(self, rhs: Page<S>) -> Self::Output {
-        Self {
-            address: self.address + rhs.address,
-            size: PhantomData,
-        }
+impl<S: PageSize> Sub<Page<S>> for Page<S> {
+    type Output = u64;
+    fn sub(self, rhs: Page<S>) -> Self::Output {
+        (self.address.as_u64() - rhs.address.as_u64()) / S::SIZE
     }
 }
 
@@ -351,9 +351,10 @@ impl<S: PageSize> AddAssign<u64> for Page<S> {
     }
 }
 
-pub trait MemoryRegion {
+pub trait MemoryRegion: Copy + core::fmt::Debug {
     fn start(&self) -> u64;
     fn end(&self) -> u64;
     fn length(&self) -> u64;
     fn contains(&self, start: u64) -> bool;
+    fn usable(&self) -> bool;
 }

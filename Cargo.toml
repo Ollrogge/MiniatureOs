@@ -16,6 +16,7 @@ panic = "abort"
 [build-dependencies]
 bootloader={path="./bootloader"}
 kernel = {path = "kernel", artifact = "bin", target = "x86_64-unknown-none" }
+walkdir="*"
 
 [workspace]
 members = [
