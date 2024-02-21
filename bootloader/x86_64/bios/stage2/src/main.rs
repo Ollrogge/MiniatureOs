@@ -90,7 +90,7 @@ fn start(disk_number: u8, partition_table_start: *const u8) -> ! {
     // FAT32 with LBA
     assert!(fat_partition.partition_type == 0xc);
 
-    let mut disk = disk::DiskAccess::new(
+    let disk = disk::DiskAccess::new(
         disk_number,
         u64::from(fat_partition.logical_block_address),
         0,

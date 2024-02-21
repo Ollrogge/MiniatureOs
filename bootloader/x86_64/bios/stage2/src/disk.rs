@@ -1,5 +1,6 @@
 use crate::dap;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SeekFrom {
     Start(u64),

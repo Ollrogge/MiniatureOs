@@ -4,12 +4,7 @@ use common::{
     mutex::{Mutex, MutexGuard},
     E820MemoryRegion,
 };
-use core::{
-    arch::asm,
-    convert::AsRef,
-    mem::size_of,
-    ops::{Deref, DerefMut},
-};
+use core::{arch::asm, convert::AsRef, mem::size_of};
 
 pub static MEMORY_MAP: Mutex<MemoryMap> = Mutex::new(MemoryMap {
     map: [E820MemoryRegion::empty(); 0x20],

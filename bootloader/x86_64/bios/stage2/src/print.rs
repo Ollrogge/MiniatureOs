@@ -41,14 +41,6 @@ impl Writer {
             }
         }
     }
-
-    fn write_str(&mut self, s: &str) -> fmt::Result {
-        for c in s.chars() {
-            Self::print_char(c as u8);
-        }
-
-        Ok(())
-    }
 }
 
 impl Write for Writer {

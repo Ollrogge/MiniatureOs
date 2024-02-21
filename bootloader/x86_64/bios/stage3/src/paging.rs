@@ -8,7 +8,6 @@
 //!
 //! PML4T -> PDPT -> PDT -> PT
 
-use bitflags::bitflags;
 use common::mutex::Mutex;
 use core::{arch::asm, borrow::BorrowMut, ops::DerefMut, slice};
 use x86_64::{

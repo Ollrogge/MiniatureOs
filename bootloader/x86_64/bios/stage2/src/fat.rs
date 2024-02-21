@@ -8,12 +8,12 @@
 //!
 //! Basically just a big single-linked list of clusters in a big table
 //! https://wiki.osdev.org/FAT
-use crate::disk::{self, SECTOR_SIZE};
-use crate::disk::{Read, Seek, SeekFrom, CLUSTER_SIZE};
+use crate::disk::{self, Read, Seek, SeekFrom, CLUSTER_SIZE, SECTOR_SIZE};
 use core::{default::Default, ptr, str};
 
 const ROOT_DIR_ENTRY_SIZE: usize = 0x20;
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum FatError {
     FileNotFound,
@@ -40,6 +40,7 @@ impl FatType {
 
 /// BIOS Parameter block
 /// Gives u metadata about the disk
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct BiosParameterBlock {
     bytes_per_sector: u16,
@@ -64,6 +65,7 @@ pub struct BiosParameterBlock {
     root_cluster: u32,
 }
 
+#[allow(dead_code)]
 impl BiosParameterBlock {
     pub fn parse<D: Read + Seek>(disk: &mut D) -> Self {
         disk.seek(SeekFrom::Start(0));
@@ -179,6 +181,7 @@ impl BiosParameterBlock {
 #[derive(PartialEq, Default, Clone)]
 struct FileAttributes(u8);
 
+#[allow(dead_code)]
 impl FileAttributes {
     const NONE: u8 = 0;
     const READ_ONLY: u8 = 0x1;
@@ -362,6 +365,7 @@ pub struct NormalDirectoryEntry {
 /// Long name directory entries are represented by a chain of 32 byte long file name entries,
 /// which always end with a normal directory entry struct.
 /// The filename field of the normal directory entry is ignored in this case.
+#[allow(dead_code)]
 pub struct LongNameDirectoryEntry {
     /// Order of this entry in the chain of long file name entries
     // TODO: handle this ?
@@ -632,9 +636,10 @@ impl FileAllocationTable {
 }
 
 /// Smallest unit of space allocation for files and directories on a FAT fs
-struct Cluster {
-    start_sector: u32,
-    size_in_sectors: u8,
+#[allow(dead_code)]
+pub struct Cluster {
+    pub start_sector: u32,
+    pub size_in_sectors: u8,
 }
 
 impl Cluster {
