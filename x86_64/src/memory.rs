@@ -1,7 +1,9 @@
 use bit_field::BitField;
-use core::fmt::{self, Display, Formatter, LowerHex, Result};
-use core::marker::PhantomData;
-use core::ops::{Add, AddAssign, Rem, Sub};
+use core::{
+    fmt::{self, Display, Formatter, LowerHex, Result},
+    marker::PhantomData,
+    ops::{Add, AddAssign, Sub},
+};
 
 pub const KiB: usize = 1024;
 pub const MiB: usize = KiB * 1024;

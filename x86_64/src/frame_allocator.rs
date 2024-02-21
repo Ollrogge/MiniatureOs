@@ -1,11 +1,5 @@
-use crate::memory::{Address, MemoryRegion, PhysicalAddress, PhysicalFrame};
-use crate::memory::{PageSize, Size4KiB};
-use core::any::Any;
-use core::clone::Clone;
-use core::iter::{Iterator, Peekable};
-use core::panic;
-
-use crate::println;
+use crate::memory::{Address, MemoryRegion, PageSize, PhysicalAddress, PhysicalFrame, Size4KiB};
+use core::{clone::Clone, iter::Iterator, panic};
 /// A trait for types that can allocate a frame of memory.
 ///
 /// # Safety

@@ -1,26 +1,14 @@
-use crate::start;
-use crate::BumpFrameAllocator;
-use crate::PageTable;
+use crate::{start, BumpFrameAllocator, PageTable};
 use common::BiosInfo;
-use core::cmp;
-use core::marker::PhantomData;
-use core::mem;
-use core::ops::Add;
-use core::ptr;
-use core::slice;
-use elfloader::arch::x86_64::RelocationTypes;
-use elfloader::*;
-use x86_64::frame_allocator;
-use x86_64::memory::Address;
-use x86_64::memory::PhysicalAddress;
-use x86_64::memory::PhysicalFrame;
-use x86_64::memory::VirtualAddress;
-use x86_64::memory::{Page, PageSize};
-use x86_64::paging::PageTableEntryFlags;
-use x86_64::paging::Translator;
-use x86_64::paging::{FourLevelPageTable, Mapper};
-use x86_64::println;
-use x86_64::{frame_allocator::FrameAllocator, memory::Size4KiB};
+use core::{cmp, marker::PhantomData, mem, ops::Add, ptr, slice};
+use elfloader::{arch::x86_64::RelocationTypes, *};
+use x86_64::{
+    frame_allocator,
+    frame_allocator::FrameAllocator,
+    memory::{Address, Page, PageSize, PhysicalAddress, PhysicalFrame, Size4KiB, VirtualAddress},
+    paging::{FourLevelPageTable, Mapper, PageTableEntryFlags, Translator},
+    println,
+};
 
 pub struct KernelLoader<'a, M, A, S> {
     virtual_base: u64,

@@ -1,10 +1,8 @@
 #![no_std]
 #![no_main]
 use bootloader_api::BootInfo;
-use core::arch::asm;
-use core::panic::PanicInfo;
-use x86_64::println;
-use x86_64::register::Cr0;
+use core::{arch::asm, panic::PanicInfo};
+use x86_64::{println, register::Cr0};
 
 static mut TEST: [u8; 0xabc123] = [0; 0xabc123];
 

@@ -7,12 +7,12 @@
 #![no_std]
 #![no_main]
 use common::{fail, hlt, mbr, BiosFramebufferInfo, BiosInfo, E820MemoryRegion};
-use x86_64::gdt::{GlobalDescriptorTable, SegmentDescriptor};
-use x86_64::memory::Region;
-
-use core::panic::PanicInfo;
-use core::slice;
+use core::{panic::PanicInfo, slice};
 use lazy_static::lazy_static;
+use x86_64::{
+    gdt::{GlobalDescriptorTable, SegmentDescriptor},
+    memory::Region,
+};
 
 mod dap;
 mod disk;
@@ -21,11 +21,9 @@ mod memory_map;
 mod print;
 mod protected_mode;
 mod vesa;
-use protected_mode::*;
-
-use memory_map::MemoryMap;
-
 use crate::memory_map::MEMORY_MAP;
+use memory_map::MemoryMap;
+use protected_mode::*;
 
 const STAGE3_DST: *mut u8 = 0x0010_0000 as *mut u8;
 const STAGE4_DST: *mut u8 = 0x0012_0000 as *mut u8;

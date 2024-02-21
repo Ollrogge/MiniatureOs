@@ -1,17 +1,14 @@
-use crate::println;
+use crate::{
+    frame_allocator::FrameAllocator,
+    memory::{Address, Page, PageSize, PhysicalAddress, PhysicalFrame, Size4KiB, VirtualAddress},
+};
 use bit_field::BitField;
-use bitflags::{bitflags, Flags};
-use core::borrow::BorrowMut;
-use core::marker::PhantomData;
-use core::ops::Add;
-use core::ops::{Index, IndexMut};
-use core::result::Result;
-use core::slice;
-use core::{clone, ptr};
-
-use crate::frame_allocator::{self, FrameAllocator};
-use crate::memory::{
-    Address, Page, PageSize, PhysicalAddress, PhysicalFrame, Size4KiB, VirtualAddress,
+use bitflags::bitflags;
+use core::{
+    ops::{Index, IndexMut},
+    ptr,
+    result::Result,
+    slice,
 };
 
 bitflags! {

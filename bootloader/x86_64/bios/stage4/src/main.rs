@@ -4,6 +4,7 @@
 #![no_main]
 use core::{arch::asm, panic::PanicInfo, ptr, slice};
 mod elf;
+use crate::elf::KernelLoader;
 use bootloader_api::BootInfo;
 use common::{hlt, BiosInfo, E820MemoryRegion};
 use x86_64::{
@@ -17,8 +18,6 @@ use x86_64::{
     println,
     register::{Cr0, Cr0Flags, Efer, EferFlags},
 };
-
-use crate::elf::KernelLoader;
 
 // hardcoded for now;
 const KERNEL_VIRTUAL_BASE: u64 = 0xffffffff80000000;

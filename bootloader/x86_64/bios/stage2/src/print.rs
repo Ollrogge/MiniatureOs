@@ -1,6 +1,4 @@
-use core::arch::asm;
-use core::fmt;
-use core::fmt::Write;
+use core::{arch::asm, fmt, fmt::Write};
 
 pub fn _print(args: fmt::Arguments) {
     let mut writer = Writer::new();

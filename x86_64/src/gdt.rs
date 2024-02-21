@@ -1,10 +1,8 @@
 //! Global Descriptor Table definitions
+use crate::memory::VirtualAddress;
 use bit_field::BitField;
 use bitflags::bitflags;
-use core::arch::asm;
-use core::ptr;
-
-use crate::memory::VirtualAddress;
+use core::{arch::asm, ptr};
 
 bitflags! {
     /// Combines the access byte and flags of a segment descriptor
