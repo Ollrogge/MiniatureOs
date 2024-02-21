@@ -49,7 +49,6 @@ bitflags! {
 }
 
 const TABLE_ENTRY_COUNT: usize = 512;
-const PAGE_SIZE: usize = 4096;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
@@ -112,20 +111,19 @@ impl PageTable {
         self.entries.iter_mut()
     }
 
-    pub fn initialize_empty_at_address(address: VirtualAddress) -> *mut PageTable {
+    pub fn initialize_empty_at_address(address: VirtualAddress) -> &'static mut PageTable {
         assert!(
             address.as_u64() as usize % PageTable::SIZE == 0,
             "Address must be properly aligned"
         );
-        let pt_ptr: *mut PageTable = address.as_u64() as *mut PageTable;
         unsafe {
-            ptr::write(pt_ptr, PageTable::empty());
+            ptr::write(address.as_mut_ptr(), PageTable::empty());
         }
-        pt_ptr
+        unsafe { &mut *address.as_mut_ptr() }
     }
 
-    pub fn at_address(address: VirtualAddress) -> *mut PageTable {
-        address.as_mut_ptr() as *mut PageTable
+    pub fn at_address(address: VirtualAddress) -> &'static mut PageTable {
+        unsafe { &mut *address.as_mut_ptr() }
     }
 
     pub fn as_u64(&mut self) -> u64 {
@@ -143,21 +141,6 @@ impl Index<usize> for PageTable {
 impl IndexMut<usize> for PageTable {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         &mut self.entries[index]
-    }
-}
-
-pub struct OffsetPageTable {
-    inner: PageTable,
-    offset: VirtualAddress,
-}
-
-impl OffsetPageTable {
-    pub fn new(inner: PageTable, offset: VirtualAddress) -> Self {
-        Self { inner, offset }
-    }
-
-    pub fn physical_frame_offset(&self) -> u64 {
-        self.offset.as_u64()
     }
 }
 
@@ -210,8 +193,6 @@ impl PageTableWalker {
             PageTable::at_address(virtual_address)
         };
 
-        let table = unsafe { &mut *table };
-
         Some(table)
     }
 
@@ -219,8 +200,7 @@ impl PageTableWalker {
         if !pagetable_entry.is_unused() {
             let virtual_address =
                 VirtualAddress::new(pagetable_entry.physical_frame().address.as_u64());
-            let table = PageTable::at_address(virtual_address);
-            Some(unsafe { &mut *table })
+            Some(PageTable::at_address(virtual_address))
         } else {
             None
         }
@@ -231,10 +211,6 @@ impl PageTableWalker {
 pub enum MappingError {
     FrameAllocationFailed,
     PageAlreadyMapped,
-}
-
-pub struct MappedPageTable<'a> {
-    pml4t: &'a mut PageTable,
 }
 
 // TODO: make unsafe to mark that these functions are inherently unsafe

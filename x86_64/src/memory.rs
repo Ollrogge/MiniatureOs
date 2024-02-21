@@ -5,9 +5,9 @@ use core::{
     ops::{Add, AddAssign, Sub},
 };
 
-pub const KiB: usize = 1024;
-pub const MiB: usize = KiB * 1024;
-pub const GiB: usize = MiB * 1024;
+pub const KIB: usize = 1024;
+pub const MIB: usize = KIB * 1024;
+pub const GIB: usize = MIB * 1024;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Region {

@@ -1,7 +1,5 @@
 use bitflags::bitflags;
-use core::arch::asm;
-use core::fmt;
-use core::marker::PhantomData;
+use core::{arch::asm, fmt, marker::PhantomData};
 
 macro_rules! wait_for {
     ($cond:expr) => {
@@ -84,6 +82,7 @@ impl<T> PartialEq for PortRegister<T> {
     }
 }
 
+#[allow(dead_code)]
 pub struct SerialPort {
     data: PortRegister<u8>,
     int_en: PortRegister<u8>,

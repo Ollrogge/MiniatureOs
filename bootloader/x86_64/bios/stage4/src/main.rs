@@ -11,8 +11,7 @@ use x86_64::{
     frame_allocator::{BumpFrameAllocator, FrameAllocator},
     gdt::{self, SegmentDescriptor},
     memory::{
-        Address, KiB, MemoryRegion, Page, PageSize, PhysicalAddress, PhysicalFrame, Size4KiB,
-        VirtualAddress,
+        Address, MemoryRegion, Page, PageSize, PhysicalAddress, PhysicalFrame, VirtualAddress, KIB,
     },
     paging::{FourLevelPageTable, Mapper, PageTable, PageTableEntryFlags},
     println,
@@ -22,7 +21,7 @@ use x86_64::{
 // hardcoded for now;
 const KERNEL_VIRTUAL_BASE: u64 = 0xffffffff80000000;
 const KERNEL_STACK_TOP: u64 = 0xffffffff00000000;
-const KERNEL_STACK_SIZE: usize = 2 * KiB;
+const KERNEL_STACK_SIZE: usize = 2 * KIB;
 
 #[panic_handler]
 pub fn panic(info: &PanicInfo) -> ! {
@@ -83,7 +82,7 @@ where
             .expect("Failed to map stack");
     }
 
-    start_page.address
+    end_page.address
 }
 
 // identity-map context switch function, so that we don't get an immediate pagefault
@@ -199,8 +198,7 @@ fn start(info: &BiosInfo) -> ! {
     // 1:1 mapping, therefore frame address = virtual address
     let kernel_page_table_address = VirtualAddress::new(frame.address.as_u64());
 
-    let mut kernel_page_table = PageTable::initialize_empty_at_address(kernel_page_table_address);
-    let kernel_page_table = unsafe { &mut *kernel_page_table };
+    let kernel_page_table = PageTable::initialize_empty_at_address(kernel_page_table_address);
 
     let mut page_table = FourLevelPageTable::new(kernel_page_table);
 
@@ -226,13 +224,8 @@ fn start(info: &BiosInfo) -> ! {
 
     context_switch(
         kernel_page_table_address.as_u64(),
-        KERNEL_STACK_TOP,
+        stack_top.as_u64(),
         kernel_entry_point.as_u64(),
         boot_info_address.as_u64(),
     );
-    //context_switch(kernel_page_table_address.as_u64(), KERNEL_STACK_TOP, kernel_entry_point.as_u64())
-
-    loop {
-        hlt();
-    }
 }

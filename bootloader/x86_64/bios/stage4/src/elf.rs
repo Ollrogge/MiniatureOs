@@ -144,9 +144,6 @@ where
                 }
             } else if header.file_size() == 0 && header.mem_size() > 0 {
                 // .bss section handling
-                let frame_cnt = header.mem_size().div_ceil(S::SIZE);
-                let virtual_start_address =
-                    VirtualAddress::new(self.virtual_base + header.offset());
                 for page in Page::range_inclusive(start_page, end_page) {
                     let frame = self
                         .frame_allocator
@@ -191,9 +188,6 @@ where
     }
 
     fn load(&mut self, flags: Flags, base: VAddr, region: &[u8]) -> Result<(), ElfLoaderErr> {
-        let start = self.virtual_base + base;
-        let end = self.virtual_base + base + region.len() as u64;
-        //println!("load region into = {:#x} -- {:#x}", start, end);
         Ok(())
     }
 
