@@ -80,6 +80,22 @@ impl Add<u64> for PhysicalAddress {
     }
 }
 
+impl Add<PhysicalAddress> for u64 {
+    type Output = PhysicalAddress;
+
+    fn add(self, rhs: PhysicalAddress) -> Self::Output {
+        PhysicalAddress(self + rhs.0)
+    }
+}
+
+impl Add<usize> for PhysicalAddress {
+    type Output = Self;
+    fn add(self, rhs: usize) -> Self::Output {
+        let rhs: u64 = rhs.try_into().unwrap();
+        Self(self.0 + rhs)
+    }
+}
+
 impl Add<PhysicalAddress> for PhysicalAddress {
     type Output = Self;
     fn add(self, rhs: PhysicalAddress) -> Self::Output {
@@ -159,6 +175,22 @@ impl VirtualAddress {
 impl Add<u64> for VirtualAddress {
     type Output = Self;
     fn add(self, rhs: u64) -> Self::Output {
+        Self(self.0 + rhs)
+    }
+}
+
+impl Add<VirtualAddress> for u64 {
+    type Output = VirtualAddress;
+
+    fn add(self, rhs: VirtualAddress) -> Self::Output {
+        VirtualAddress(self + rhs.0)
+    }
+}
+
+impl Add<usize> for VirtualAddress {
+    type Output = Self;
+    fn add(self, rhs: usize) -> Self::Output {
+        let rhs: u64 = rhs.try_into().unwrap();
         Self(self.0 + rhs)
     }
 }
@@ -301,6 +333,10 @@ impl<S: PageSize> Page<S> {
     }
     pub fn range_inclusive(start: Page<S>, end: Page<S>) -> PageRangeInclusive<S> {
         PageRangeInclusive { start, end }
+    }
+
+    pub fn size(self) -> u64 {
+        S::SIZE
     }
 }
 

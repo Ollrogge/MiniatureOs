@@ -2,6 +2,9 @@
 use bit_field::BitField;
 use bitflags::bitflags;
 use core::arch::asm;
+use core::ptr;
+
+use crate::memory::VirtualAddress;
 
 bitflags! {
     /// Combines the access byte and flags of a segment descriptor
@@ -18,7 +21,7 @@ bitflags! {
         const CONFORMING = 1 << 42;
         const EXECUTABLE = 1 << 43;
         /// Descriptor type. clear = system segment, set = code or data
-        const CODE_OR_DATA = 1 << 44;
+        const USER_SEGMENT = 1 << 44;
         /// Entry refers to valid segment
         const PRESENT = 1 << 47;
         /// Set if descriptor defines a 64-bit code segment
@@ -56,7 +59,7 @@ impl SegmentDescriptor {
         let flags = SegmentDescriptorFlags::READ_WRITE
             | SegmentDescriptorFlags::EXECUTABLE
             | SegmentDescriptorFlags::PRESENT
-            | SegmentDescriptorFlags::CODE_OR_DATA
+            | SegmentDescriptorFlags::USER_SEGMENT
             | SegmentDescriptorFlags::PROTECTED_MODE
             | SegmentDescriptorFlags::GRANULARITY
             | SegmentDescriptorFlags::ACCESSED;
@@ -73,7 +76,7 @@ impl SegmentDescriptor {
     pub fn protected_mode_data_segment() -> SegmentDescriptor {
         let flags = SegmentDescriptorFlags::READ_WRITE
             | SegmentDescriptorFlags::PRESENT
-            | SegmentDescriptorFlags::CODE_OR_DATA
+            | SegmentDescriptorFlags::USER_SEGMENT
             | SegmentDescriptorFlags::PROTECTED_MODE
             | SegmentDescriptorFlags::GRANULARITY
             | SegmentDescriptorFlags::ACCESSED;
@@ -85,7 +88,7 @@ impl SegmentDescriptor {
         let flags = SegmentDescriptorFlags::READ_WRITE
             | SegmentDescriptorFlags::EXECUTABLE
             | SegmentDescriptorFlags::PRESENT
-            | SegmentDescriptorFlags::CODE_OR_DATA
+            | SegmentDescriptorFlags::USER_SEGMENT
             | SegmentDescriptorFlags::LONG_MODE
             | SegmentDescriptorFlags::ACCESSED;
 
@@ -97,10 +100,18 @@ impl SegmentDescriptor {
     pub fn long_mode_data_segment() -> SegmentDescriptor {
         let flags = SegmentDescriptorFlags::READ_WRITE
             | SegmentDescriptorFlags::PRESENT
-            | SegmentDescriptorFlags::CODE_OR_DATA
+            | SegmentDescriptorFlags::USER_SEGMENT
             | SegmentDescriptorFlags::ACCESSED;
 
         SegmentDescriptor::new(flags, 0, 0)
+    }
+
+    pub fn kernel_code_segment() -> SegmentDescriptor {
+        Self::long_mode_code_segment()
+    }
+
+    pub fn kernel_data_segment() -> SegmentDescriptor {
+        Self::long_mode_data_segment()
     }
 }
 
@@ -121,6 +132,16 @@ impl GlobalDescriptorTable {
         }
     }
 
+    pub fn initialize_at_address(address: VirtualAddress) -> &'static mut GlobalDescriptorTable {
+        let gdt_ptr: *mut GlobalDescriptorTable = address.as_mut_ptr();
+
+        unsafe {
+            ptr::write(gdt_ptr, Self::new());
+        }
+
+        unsafe { &mut *gdt_ptr }
+    }
+
     pub fn add_entry(&mut self, entry: SegmentDescriptor) {
         self.push(entry.0);
     }
@@ -136,11 +157,18 @@ impl GlobalDescriptorTable {
         }
     }
 
-    pub fn clear_interrupts_and_load(&'static self) {
+    pub fn clear_interrupts_and_load(&self) {
         let desc = GlobalDescriptorTableDescriptor::new(self);
 
         unsafe {
             asm!("cli", "lgdt [{}]", in(reg) &desc, options(readonly, nostack, preserves_flags));
+        }
+    }
+
+    pub fn load(&self) {
+        let desc = GlobalDescriptorTableDescriptor::new(self);
+        unsafe {
+            asm!("lgdt [{}]", in(reg) &desc, options(readonly, nostack, preserves_flags));
         }
     }
 }

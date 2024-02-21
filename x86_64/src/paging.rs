@@ -187,7 +187,7 @@ impl PageTableWalker {
     // assumes 1:1 mapping for physical frames holding pagetable data
     // using virtual addresses here because we are in long mode and all memory accesses
     // are based on virtual memory. So just to make it explicit
-    pub fn get_pagetable<'a, A>(
+    pub fn get_or_allocate_pagetable<'a, A>(
         &self,
         pagetable_entry: &'a mut PageTableEntry,
         flags: PageTableEntryFlags,
@@ -207,15 +207,26 @@ impl PageTableWalker {
             if !flags.is_empty() && !pagetable_entry.flags().contains(flags) {
                 pagetable_entry.set_flags(pagetable_entry.flags() | flags);
             }
-            let physical_address = pagetable_entry.physical_address();
             // 1:1
-            let virtual_address = VirtualAddress::new(physical_address.as_u64());
+            let virtual_address =
+                VirtualAddress::new(pagetable_entry.physical_frame().address.as_u64());
             PageTable::at_address(virtual_address)
         };
 
         let table = unsafe { &mut *table };
 
         Some(table)
+    }
+
+    pub fn get_pagetable<'a>(&self, pagetable_entry: &'a PageTableEntry) -> Option<&'a PageTable> {
+        if !pagetable_entry.is_unused() {
+            let virtual_address =
+                VirtualAddress::new(pagetable_entry.physical_frame().address.as_u64());
+            let table = PageTable::at_address(virtual_address);
+            Some(unsafe { &mut *table })
+        } else {
+            None
+        }
     }
 }
 
@@ -231,7 +242,7 @@ pub struct MappedPageTable<'a> {
 
 // TODO: make unsafe to mark that these functions are inherently unsafe
 // S = trait wide scope
-pub trait Mapper<S> {
+pub trait Mapper<S: PageSize> {
     // A = method wide scope
     fn map_to<A>(
         &mut self,
@@ -241,7 +252,6 @@ pub trait Mapper<S> {
         frame_allocator: &mut A,
     ) -> Result<(), MappingError>
     where
-        S: PageSize,
         A: FrameAllocator<S>;
 
     fn identity_map<A>(
@@ -251,7 +261,6 @@ pub trait Mapper<S> {
         frame_allocator: &mut A,
     ) -> Result<(), MappingError>
     where
-        S: PageSize,
         A: FrameAllocator<S>,
     {
         let page = Page::containing_address(VirtualAddress::new(frame.address.as_u64()));
@@ -276,7 +285,7 @@ impl<'a> Mapper<Size4KiB> for FourLevelPageTable<'a> {
         let l4 = &mut self.pml4t;
         let l3 = self
             .walker
-            .get_pagetable(
+            .get_or_allocate_pagetable(
                 &mut l4[page.address.l4_index()],
                 parent_flags,
                 frame_allocator,
@@ -284,7 +293,7 @@ impl<'a> Mapper<Size4KiB> for FourLevelPageTable<'a> {
             .ok_or(MappingError::FrameAllocationFailed)?;
         let l2 = self
             .walker
-            .get_pagetable(
+            .get_or_allocate_pagetable(
                 &mut l3[page.address.l3_index()],
                 parent_flags,
                 frame_allocator,
@@ -292,7 +301,7 @@ impl<'a> Mapper<Size4KiB> for FourLevelPageTable<'a> {
             .ok_or(MappingError::FrameAllocationFailed)?;
         let l1 = self
             .walker
-            .get_pagetable(
+            .get_or_allocate_pagetable(
                 &mut l2[page.address.l2_index()],
                 parent_flags,
                 frame_allocator,
@@ -306,6 +315,42 @@ impl<'a> Mapper<Size4KiB> for FourLevelPageTable<'a> {
         } else {
             pte.set_frame(frame, flags);
             Ok(())
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum TranslationError {
+    NotMapped,
+}
+
+/// Translates page to physical frame using page table
+pub trait Translator<S: PageSize> {
+    fn translate(&self, page: Page<S>) -> Result<PhysicalFrame, TranslationError>;
+}
+
+impl<'a> Translator<Size4KiB> for FourLevelPageTable<'a> {
+    fn translate(&self, page: Page<Size4KiB>) -> Result<PhysicalFrame, TranslationError> {
+        let l4 = &self.pml4t;
+        let l3 = self
+            .walker
+            .get_pagetable(&l4[page.address.l4_index()])
+            .ok_or(TranslationError::NotMapped)?;
+        let l2 = self
+            .walker
+            .get_pagetable(&l3[page.address.l3_index()])
+            .ok_or(TranslationError::NotMapped)?;
+        let l1 = self
+            .walker
+            .get_pagetable(&l2[page.address.l2_index()])
+            .ok_or(TranslationError::NotMapped)?;
+
+        let pte = &l1[page.address.l1_index()];
+
+        if pte.is_present() {
+            Ok(pte.physical_frame())
+        } else {
+            Err(TranslationError::NotMapped)
         }
     }
 }

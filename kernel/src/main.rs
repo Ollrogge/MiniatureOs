@@ -1,8 +1,10 @@
 #![no_std]
 #![no_main]
 use bootloader_api::BootInfo;
+use core::arch::asm;
 use core::panic::PanicInfo;
 use x86_64::println;
+use x86_64::register::Cr0;
 
 static mut TEST: [u8; 0xabc123] = [0; 0xabc123];
 
@@ -18,7 +20,6 @@ pub extern "C" fn _start(info: &'static BootInfo) -> ! {
 }
 
 fn start(info: &'static BootInfo) -> ! {
-    println!("a");
+    println!("Hello from kernel <3");
     loop {}
-    //println!("Hello from kernel <3");
 }

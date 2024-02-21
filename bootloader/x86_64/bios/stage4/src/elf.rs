@@ -2,7 +2,9 @@ use crate::start;
 use crate::BumpFrameAllocator;
 use crate::PageTable;
 use common::BiosInfo;
+use core::cmp;
 use core::marker::PhantomData;
+use core::mem;
 use core::ops::Add;
 use core::ptr;
 use core::slice;
@@ -15,6 +17,7 @@ use x86_64::memory::PhysicalFrame;
 use x86_64::memory::VirtualAddress;
 use x86_64::memory::{Page, PageSize};
 use x86_64::paging::PageTableEntryFlags;
+use x86_64::paging::Translator;
 use x86_64::paging::{FourLevelPageTable, Mapper};
 use x86_64::println;
 use x86_64::{frame_allocator::FrameAllocator, memory::Size4KiB};
@@ -29,7 +32,7 @@ pub struct KernelLoader<'a, M, A, S> {
 
 impl<'a, M, A, S> KernelLoader<'a, M, A, S>
 where
-    M: Mapper<S>,
+    M: Mapper<S> + Translator<S>,
     A: FrameAllocator<S>,
     S: PageSize,
 {
@@ -63,22 +66,37 @@ where
     // https://dram.page/p/relative-relocs-explained/
     // Basically means: Please fill in the value of (virtual_base + addend) at offset from base of executable
     fn handle_relative_relocation(&mut self, entry: RelocationEntry) {
-        let relocated_address = self.virtual_base
+        let value = self.virtual_base
             + entry
                 .addend
-                .expect("Relative relocation with addend value = None");
+                .expect("Relative relocation: addend value = None");
 
-        // 1:1 mapping
-        let address = VirtualAddress::new(self.info.kernel.start + entry.offset);
-        let ptr = address.as_mut_ptr();
+        // the relocation may span two pages
+        // (e.g. 4 bytes of value on page A and 4 bytes on page B)
+        let virtual_address = VirtualAddress::new(self.virtual_base + entry.offset);
+        let start_page = Page::containing_address(virtual_address);
+        let end_page = Page::containing_address(virtual_address + mem::size_of::<u64>());
+        for page in Page::range_inclusive(start_page, end_page) {
+            // entry.offset if relative to virtual base, so we need to first map
+            // the page corresponding to virtual base to its physical frame and then
+            // calculate the correct offset
+            let frame = self
+                .page_table
+                .translate(page)
+                .expect("Relative relocation: Failed to map page to frame");
+            let end_of_page = page.address + page.size() - 1;
+            let offset = (cmp::min(virtual_address, end_of_page) - page.address.as_u64()).as_u64();
 
-        unsafe { ptr::write(ptr, relocated_address) };
+            let address = VirtualAddress::new(frame.address.as_u64() + offset);
+            let ptr = address.as_mut_ptr();
+            unsafe { ptr::write(ptr, value.to_ne_bytes()) };
+        }
     }
 }
 
 impl<'a, M, A, S> ElfLoader for KernelLoader<'a, M, A, S>
 where
-    M: Mapper<S>,
+    M: Mapper<S> + Translator<S>,
     A: FrameAllocator<S>,
     S: PageSize,
 {

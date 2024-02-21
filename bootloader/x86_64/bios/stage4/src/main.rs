@@ -8,6 +8,7 @@ use bootloader_api::BootInfo;
 use common::{hlt, BiosInfo, E820MemoryRegion};
 use x86_64::{
     frame_allocator::{BumpFrameAllocator, FrameAllocator},
+    gdt::{self, SegmentDescriptor},
     memory::{
         Address, KiB, MemoryRegion, Page, PageSize, PhysicalAddress, PhysicalFrame, Size4KiB,
         VirtualAddress,
@@ -102,6 +103,34 @@ where
         .expect("Identify mapping failed");
 }
 
+fn initialize_and_map_gdt<A, M, S>(frame_allocator: &mut A, page_table: &mut M)
+where
+    A: FrameAllocator<S>,
+    M: Mapper<S>,
+    S: PageSize,
+{
+    let frame = frame_allocator
+        .allocate_frame()
+        .expect("Failed to allocate gdt frame");
+
+    let virtual_address = VirtualAddress::new(frame.address.as_u64());
+
+    let gdt = gdt::GlobalDescriptorTable::initialize_at_address(virtual_address);
+
+    // kinda useless since equal to long mode descriptors.
+    gdt.add_entry(SegmentDescriptor::kernel_code_segment());
+    gdt.add_entry(SegmentDescriptor::kernel_data_segment());
+
+    gdt.load();
+
+    // we dont need to reset the segment registers, since they still contain the
+    // correct indexes. We just exchanged the descriptors.
+
+    page_table
+        .identity_map(frame, PageTableEntryFlags::PRESENT, frame_allocator)
+        .expect("Identity mapping gdt failed");
+}
+
 fn allocate_and_map_boot_info<A, M, S>(
     frame_allocator: &mut A,
     page_table: &mut M,
@@ -186,6 +215,10 @@ fn start(info: &BiosInfo) -> ! {
     let boot_info = BootInfo::new(info.kernel);
 
     let boot_info_address = allocate_and_map_boot_info(&mut allocator, &mut page_table, &boot_info);
+
+    initialize_and_map_gdt(&mut allocator, &mut page_table);
+
+    // todo: detect RSDP (Root System Description Pointer)
 
     println!(
         "Switching to kernel entry point at {:#x}",
