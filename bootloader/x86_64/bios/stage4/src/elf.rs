@@ -10,6 +10,10 @@ use x86_64::{
     println,
 };
 
+// TODO: move this functionality to a more general util crate since I will
+// need it to load elfs for the kernel as well
+// also TODO: remove dependency to elfloader
+
 pub struct KernelLoader<'a, M, A, S> {
     virtual_base: u64,
     info: &'a BiosInfo,

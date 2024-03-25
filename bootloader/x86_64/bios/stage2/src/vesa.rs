@@ -1,29 +1,19 @@
-//! VESA BIOS Extension (VBE) definitions
+//! This module implements functionality for VESA BIOS Extension (VBE).
+//! Mainly this includes querying and setting display modes.
 //! https://wiki.osdev.org/VESA_Video_Modes
 //! http://www.petesqbsite.com/sections/tutorials/tuts/vbe3.pdf
 //! specification for standard software access to graphics display controllers
 //! which support resolutions, color depths, and frame buffer organizations
 //! beyond the VGA hardware standard
 use crate::println;
-use common::{const_assert, BiosFramebufferInfo, PixelFormat};
+use common::{const_assert, realmode::RealModePointer, BiosFramebufferInfo, PixelFormat};
 use core::{arch::asm, default::Default, mem::size_of};
 use x86_64::memory::Region;
 
-#[derive(Debug, Clone, Copy)]
-#[repr(C)]
-struct RealModePtr(u32);
-
-const VESA_SUCCESS: u16 = 0x4f;
-
-impl RealModePtr {
-    pub fn segment(&self) -> u16 {
-        (self.0 >> 16) as u16
-    }
-
-    pub fn offset(&self) -> u16 {
-        self.0 as u16
-    }
-}
+/// All VESA functions return 0x4F in AL if they are supported and use AH as a
+/// status flag, with 0x00 being success. This means that you should check that
+/// AX is 0x004F after each VESA call to see if it succeeded.
+const VESA_SUCCESS: u16 = 0x004f;
 
 /// Display controller info
 #[derive(Debug)]
@@ -32,9 +22,11 @@ impl RealModePtr {
 pub struct VbeInfo {
     signature: [u8; 4], // should be "VESA"
     version: u16,       // should be 0x0300 for VBE 3.0
-    oem_string_ptr: RealModePtr,
+    oem_string_ptr: RealModePointer,
     capabilities: u32,
-    video_mode_ptr: RealModePtr,
+    /// Pointer to an array of video mode ids which one can use to query information
+    /// for that specific mode
+    video_mode_array_pointer: RealModePointer,
     total_memory: u16, // number of 64KB blocks
     reserved: [u8; 512 - 0x14],
 }
@@ -45,9 +37,9 @@ impl Default for VbeInfo {
         VbeInfo {
             signature: [0; 4],
             version: 0,
-            oem_string_ptr: RealModePtr(0),
+            oem_string_ptr: RealModePointer(0),
             capabilities: 0,
-            video_mode_ptr: RealModePtr(0),
+            video_mode_array_pointer: RealModePointer(0),
             total_memory: 0,
             reserved: [0; 512 - 0x14],
         }
@@ -55,6 +47,7 @@ impl Default for VbeInfo {
 }
 
 impl VbeInfo {
+    /// Get VbeInfo
     pub fn get() -> Result<Self, u16> {
         let mut obj = Self::default();
         let ret;
@@ -68,21 +61,20 @@ impl VbeInfo {
         }
     }
 
-    fn get_mode(&self, offset: i32) -> Option<u16> {
-        /*
-                error[E0793]: reference to packed field is unaligned
-          --> Bootloader/x86_64/common/src/vesa.rs:61:38
-           |
-        61 |         let video_mode_ptr_segment = self.video_mode_ptr.segment() as u32;
-           |                                      ^^^^^^^^^^^^^^^^^^^
-           |
-           = note: packed structs are only aligned by one byte, and many modern architectures penalize unaligned field accesses
-           = note: creating a misaligned reference is undefined behavior (even if that reference is never dereferenced)
-           = help: copy the field contents to a local variable, or replace the reference with a raw pointer and use `read_unaligned`/`write_unaligned` (loads and stores via `*p` must be properly aligned even when using raw pointers)
-        */
+    /// Returns the video mode ID located at a specified `offset` from the
+    /// beginning of the video mode array.
+    ///
+    /// The video mode ID is a 16-bit value uniquely identifying a video mode
+    /// supported by the system.
+    ///
+    /// # Safety
+    /// This function is `unsafe` because it performs unchecked pointer arithmetic
+    /// based on the provided `offset`. Accessing beyond the end of the video mode
+    /// array could lead to undefined behavior.
+    unsafe fn get_mode(&self, offset: i32) -> Option<u16> {
         // variable required since else the access is unaligned as self.video_mode_ptr
         // is a member of a packed struct
-        let video_mode_ptr = self.video_mode_ptr;
+        let video_mode_ptr = self.video_mode_array_pointer;
         let ptr = (((video_mode_ptr.segment() as u32) << 4) + video_mode_ptr.offset() as u32)
             as *const u16;
 
@@ -95,12 +87,13 @@ impl VbeInfo {
         }
     }
 
+    /// Get the display mode id of the mode closest to the specified parameters
     pub fn get_best_mode(&self, width: u16, height: u16, depth: u8) -> Option<u16> {
-        let mut best = None;
+        let mut best: Option<u16> = None;
         let mut best_pix_diff = u32::MAX;
         let mut best_depth_diff = u8::MAX;
         for i in 0.. {
-            let mode = match self.get_mode(i) {
+            let mode = match unsafe { self.get_mode(i) } {
                 Some(mode) => mode,
                 None => break,
             };
@@ -163,7 +156,8 @@ impl VbeInfo {
     }
 }
 
-/// Information about a specific display mode
+/// Vbe mode information block
+/// Contains information about a specific display mode
 #[derive(Debug)]
 #[repr(C)]
 pub struct VbeModeInfo {
@@ -246,7 +240,7 @@ impl Default for VbeModeInfo {
 impl VbeModeInfo {
     pub fn get(mode: u16) -> Result<Self, u16> {
         let mut obj = Self::default();
-        let ptr = RealModePtr(&mut obj as *mut VbeModeInfo as u32);
+        let ptr = RealModePointer(&mut obj as *mut VbeModeInfo as u32);
         let mut ret: u16;
         unsafe {
             asm!("push es", "mov es, {:x}", "int 0x10", "pop es", in(reg) ptr.segment(), in("di") ptr.offset(), inout("ax") 0x4f01u16 => ret, in("cx") mode);

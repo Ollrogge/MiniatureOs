@@ -4,6 +4,7 @@ use core::{arch::asm, mem::size_of};
 use x86_64::memory::{MemoryRegion, Region};
 
 pub mod mbr;
+pub mod realmode;
 
 #[macro_export]
 macro_rules! const_assert {
