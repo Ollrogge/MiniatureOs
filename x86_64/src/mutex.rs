@@ -1,3 +1,4 @@
+// todo: this is not x86_64 specific code. should be moved to somewhere else
 use core::{
     cell::UnsafeCell,
     ops::{Deref, DerefMut},

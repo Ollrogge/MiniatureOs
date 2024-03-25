@@ -1,3 +1,6 @@
+//! This module implements the handling of the PartitionTable stored at the end
+//! of the master boot record
+
 /// An entry in a partition table.
 ///
 /// Based on https://docs.rs/mbr-nostd
@@ -37,7 +40,7 @@ impl PartitionTableEntry {
     }
 }
 
-pub fn get_partition(partition_table: &[u8], index: usize) -> PartitionTableEntry {
+pub fn get_partition_table_entry(partition_table: &[u8], index: usize) -> PartitionTableEntry {
     const ENTRY_SIZE: usize = 16;
 
     let offset = index * ENTRY_SIZE;

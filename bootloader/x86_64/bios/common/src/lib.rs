@@ -1,10 +1,9 @@
 #![no_std]
 #![no_main]
-use core::arch::asm;
+use core::{arch::asm, mem::size_of};
 use x86_64::memory::{MemoryRegion, Region};
 
 pub mod mbr;
-pub mod mutex;
 
 #[macro_export]
 macro_rules! const_assert {
@@ -122,6 +121,7 @@ pub struct E820MemoryRegion {
     pub typ: E820MemoryRegionType,
     pub acpi_extended_attributes: u32,
 }
+const_assert!(size_of::<E820MemoryRegion>() == 24);
 
 impl E820MemoryRegion {
     pub const fn empty() -> Self {

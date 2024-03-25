@@ -1,4 +1,4 @@
-//! Stage4 of the bootloader. Long mode
+//! This module contains the stage4 code of the bootloader.
 //! So close to kernel now :P
 #![no_std]
 #![no_main]
@@ -163,12 +163,16 @@ where
 /// Enable the No execute enable bit in the Efer register
 /// Allows to set the Execute Disable flag on page table entries
 fn enable_nxe_bit() {
-    Efer::update(|val| *val |= EferFlags::NO_EXECUTE_ENABLE);
+    unsafe {
+        Efer::update(|val| *val |= EferFlags::NO_EXECUTE_ENABLE);
+    }
 }
 
 // Make the kernel respect the write-protection bits even when in ring 0 by default
 fn enable_write_protect_bit() {
-    Cr0::update(|val| *val |= Cr0Flags::WRITE_PROTECT);
+    unsafe {
+        Cr0::update(|val| *val |= Cr0Flags::WRITE_PROTECT);
+    }
 }
 
 fn start(info: &BiosInfo) -> ! {
@@ -197,9 +201,7 @@ fn start(info: &BiosInfo) -> ! {
 
     // 1:1 mapping, therefore frame address = virtual address
     let kernel_page_table_address = VirtualAddress::new(frame.address.as_u64());
-
     let kernel_page_table = PageTable::initialize_empty_at_address(kernel_page_table_address);
-
     let mut page_table = FourLevelPageTable::new(kernel_page_table);
 
     let mut loader = KernelLoader::new(KERNEL_VIRTUAL_BASE, info, &mut page_table, &mut allocator);
@@ -210,7 +212,6 @@ fn start(info: &BiosInfo) -> ! {
     identity_map_context_switch_function(&mut allocator, &mut page_table);
 
     let boot_info = BootInfo::new(info.kernel);
-
     let boot_info_address = allocate_and_map_boot_info(&mut allocator, &mut page_table, &boot_info);
 
     initialize_and_map_gdt(&mut allocator, &mut page_table);

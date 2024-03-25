@@ -1,6 +1,7 @@
 #![no_std]
 pub mod frame_allocator;
 pub mod gdt;
+pub mod interrupts;
 pub mod memory;
 pub mod mutex;
 pub mod paging;

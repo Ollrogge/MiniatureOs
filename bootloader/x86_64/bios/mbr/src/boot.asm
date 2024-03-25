@@ -1,5 +1,5 @@
+# This module reads stage1 from disk, loads it into memory and executes it
 # http://www.cs.cmu.edu/~410-s07/p4/p4-boot.pdf
-# read stage1 from disk, load it into memory and execute it
 
 .section .boot, "awx"
 .global _start
@@ -33,18 +33,23 @@ enable_a20:
     out 0x92, al
 enable_a20_after:
 
-; https://wiki.osdev.org/Disk_access_using_the_BIOS_(INT_13h)
+# Use BIOS function 0x41 to check if int 13 extension is present
+# https://en.wikipedia.org/wiki/INT_13H
 check_int13h:
     push 1
     mov ah, 0x41
+    # drive index. First HDD = 0x80
+    mov dx, 0x80
     mov bx, 0x55AA
     int 0x13
 
+    # carry flag will be set if int13 extension is not supported
+    # fail is defined in rust code
     jc fail
     pop ax
 
 rust:
-    push dx # drive number
+    push dx # drive index
     call first_stage
 
 

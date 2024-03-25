@@ -1,3 +1,4 @@
+//! This module implements helper functions for x86 registers
 use bitflags::bitflags;
 use core::arch::asm;
 
@@ -23,7 +24,10 @@ bitflags! {
     }
 }
 
-pub struct Msr;
+/// Model specific register.
+/// This struct should not be used on its own. Only by implementations of
+/// model specific registers
+struct Msr;
 
 impl Msr {
     pub fn read(num: u32) -> u64 {
@@ -55,12 +59,20 @@ impl Msr {
     }
 }
 
+/// The extended feature enable register.
+/// This is a model-specific register mainly used to enable / disable long mode
 pub struct Efer;
 
 impl Efer {
-    const NUM: u32 = 0xC0000080;
+    const MSR_NUM: u32 = 0xC0000080;
 
-    pub fn update<F>(f: F)
+    /// Updates EFER register flags.
+    ///
+    /// # Safety
+    ///
+    /// Unsafe because it’s possible to break memory safety with wrong flags,
+    /// e.g. by disabling long mode
+    pub unsafe fn update<F>(f: F)
     where
         F: FnOnce(&mut EferFlags),
     {
@@ -69,25 +81,36 @@ impl Efer {
         Self::write(flags);
     }
 
+    /// Reads the raw EFER register.
     pub fn read_raw() -> u64 {
-        Msr::read(Self::NUM)
+        Msr::read(Self::MSR_NUM)
     }
 
+    /// Reads the EFER flags.
     pub fn read() -> EferFlags {
         EferFlags::from_bits_truncate(Self::read_raw())
     }
 
-    pub fn write(val: EferFlags) {
+    /// Writes a raw value to the EFER register
+    ///
+    /// # Safety
+    ///
+    /// Unsafe because it’s possible to break memory safety with wrong flags,
+    /// e.g. by disabling long mode
+    pub unsafe fn write_raw(val: u64) {
+        Msr::write(Self::MSR_NUM, val)
+    }
+
+    /// Writes EFER flags
+    ///
+    /// # Safety
+    ///
+    /// Unsafe because it’s possible to break memory safety with wrong flags,
+    /// e.g. by disabling long mode
+    pub unsafe fn write(val: EferFlags) {
         Self::write_raw(val.bits())
     }
-
-    pub fn write_raw(val: u64) {
-        Msr::write(Self::NUM, val)
-    }
 }
-
-#[derive(Debug)]
-pub struct Cr0;
 
 bitflags! {
     /// Configuration flags of the [`Cr0`] register.
@@ -131,8 +154,17 @@ bitflags! {
     }
 }
 
+#[derive(Debug)]
+pub struct Cr0;
+
 impl Cr0 {
-    pub fn update<F>(f: F)
+    /// Updates CR0 register flags.
+    ///
+    /// # Safety
+    ///
+    /// Unsafe because it’s possible to break memory safety with wrong flags,
+    /// e.g. by disabling paging
+    pub unsafe fn update<F>(f: F)
     where
         F: FnOnce(&mut Cr0Flags),
     {
@@ -141,11 +173,7 @@ impl Cr0 {
         Self::write(flags);
     }
 
-    // usize is a hack to make this compile from 16 / 32 bit context as well
-    fn read() -> Cr0Flags {
-        Cr0Flags::from_bits_truncate(Self::read_raw())
-    }
-
+    /// Reads the raw EFER register.
     pub fn read_raw() -> u64 {
         let mut cr0: usize;
         unsafe {
@@ -154,12 +182,28 @@ impl Cr0 {
         cr0 as u64
     }
 
-    // usize is a hack to make this compile from 16 / 32 bit context as well
-    pub fn write(val: Cr0Flags) {
-        Self::write_raw(val.bits())
+    /// Reads the EFER flags.
+    fn read() -> Cr0Flags {
+        Cr0Flags::from_bits_truncate(Self::read_raw())
     }
 
-    pub fn write_raw(val: u64) {
+    /// Writes CR0 flags
+    ///
+    /// # Safety
+    ///
+    /// Unsafe because it’s possible to break memory safety with wrong flags,
+    /// e.g. by disabling paging
+    pub unsafe fn write(val: Cr0Flags) {
+        unsafe { Self::write_raw(val.bits()) }
+    }
+
+    /// Writes a raw value to the CR0 register
+    ///
+    /// # Safety
+    ///
+    /// Unsafe because it’s possible to break memory safety with wrong flags,
+    /// e.g. by disabling paging
+    pub unsafe fn write_raw(val: u64) {
         unsafe { asm!("mov cr0, {}", in(reg) val as usize, options(nostack, preserves_flags)) };
     }
 }

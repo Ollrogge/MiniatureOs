@@ -1,4 +1,4 @@
-//! //! FAT file system parser
+//! Basic FAT file system parser
 //!
 //! The file system consists of three basic components:
 //!

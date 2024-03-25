@@ -1,6 +1,7 @@
 ENTRY(_start)
 
 SECTIONS {
+    /* starts directly after mbr */
     . = 0x7c00 + 512;
 
     .start : {

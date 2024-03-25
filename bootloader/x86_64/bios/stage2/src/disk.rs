@@ -18,7 +18,7 @@ pub trait Read {
 
 #[derive(Clone)]
 pub struct DiskAccess {
-    pub disk_number: u8,
+    pub disk_number: u16,
     // both have sectors as unit
     pub base_lba: u64,
     pub offset: u64,
@@ -29,7 +29,7 @@ pub const SECTOR_SIZE: usize = 512;
 pub const CLUSTER_SIZE: usize = 2 * SECTOR_SIZE;
 
 impl DiskAccess {
-    pub fn new(disk_number: u8, base_lba: u64, offset: u64) -> DiskAccess {
+    pub fn new(disk_number: u16, base_lba: u64, offset: u64) -> DiskAccess {
         DiskAccess {
             disk_number,
             base_lba,

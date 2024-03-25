@@ -74,7 +74,7 @@ impl DiskImageBuilder {
             starting_lba: second_stage_start_sector,
             // make sure we round up
             sectors: second_stage_sectors,
-            // no idea
+            // no idea what this identifier describes.
             sys: 0x20,
             first_chs: mbrman::CHS::empty(),
             last_chs: mbrman::CHS::empty(),

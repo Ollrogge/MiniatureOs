@@ -155,10 +155,6 @@ fn build_stage4() -> Result<PathBuf> {
 }
 
 pub fn build_bios() {
-    let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
-
-    //println!("Out dir: {:?}", out_dir);
-
     println!("cargo:rerun-if-changed=../../x86_64");
 
     let mbr_path = build_mbr().unwrap();

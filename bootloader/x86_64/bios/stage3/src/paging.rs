@@ -8,10 +8,10 @@
 //!
 //! PML4T -> PDPT -> PDT -> PT
 
-use common::mutex::Mutex;
 use core::{arch::asm, borrow::BorrowMut, ops::DerefMut, slice};
 use x86_64::{
     memory::{GIB, MIB},
+    mutex::Mutex,
     paging::{PageTable, PageTableEntry, PageTableEntryFlags},
     println,
 };
@@ -22,7 +22,6 @@ static PDT: Mutex<[PageTable; 10]> = Mutex::new([PageTable::empty(); 10]);
 
 pub fn init() {
     create_mappings();
-
     enable_paging();
 }
 
@@ -55,32 +54,6 @@ fn create_mappings() {
         }
     }
 }
-
-/*
-fn create_mappings() {
-    // can be sure that the addresses of the tables work since stage3 is mapped at 1MiB
-    let flags = PageTableFlags::WRITABLE | PageTableFlags::PRESENT;
-    let mut l4 = PML4T.lock();
-    let mut l3 = PDPT.lock();
-    let mut l2 = PDT.lock();
-    let mut l1 = PT.lock();
-    l4.entries[0] = PageTableEntry((&mut *l3 as *mut PageTable as u64) | flags.bits());
-    for i in 0..l2.len() {
-        l3.entries[i] = PageTableEntry((&mut l2[i] as *mut PageTable as u64) | flags.bits());
-    }
-    for i in 0..l1.len() {
-        l2[i / TABLE_ENTRY_COUNT].entries[i % TABLE_ENTRY_COUNT] =
-            PageTableEntry((&mut l1[i] as *mut PageTable as u64) | flags.bits());
-    }
-    for (i, table) in l1.iter_mut().enumerate() {
-        for (j, entry) in table.iter_mut().enumerate() {
-            // 1:1 mapping to physical address
-            let addr = ((i * TABLE_ENTRY_COUNT + j) * PAGE_SIZE) as u64;
-            *entry = PageTableEntry(addr | flags.bits());
-        }
-    }
-}
-*/
 
 fn enable_paging() {
     // load level 4 table pointer into cr3 register

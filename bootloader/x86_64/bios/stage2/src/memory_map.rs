@@ -1,10 +1,8 @@
-//! Memory information
-//! https://wiki.osdev.org/Detecting_Memory_(x86)#Getting_an_E820_Memory_Map (c code)
-use common::{
-    mutex::{Mutex, MutexGuard},
-    E820MemoryRegion,
-};
+//! This module is responsible for detecting available memory using x86 BIOS
+//! functions
+use common::E820MemoryRegion;
 use core::{arch::asm, convert::AsRef, mem::size_of};
+use x86_64::mutex::{Mutex, MutexGuard};
 
 pub static MEMORY_MAP: Mutex<MemoryMap> = Mutex::new(MemoryMap {
     map: [E820MemoryRegion::empty(); 0x20],
@@ -18,12 +16,15 @@ pub struct MemoryMap {
 }
 
 impl MemoryMap {
+    /// Detecting memory using BIOS function 0xe820
+    /// https://wiki.osdev.org/Detecting_Memory_(x86)#BIOS_Function:_INT_0x15.2C_EAX_.3D_0xE820
     pub fn get() -> Result<MutexGuard<'static, MemoryMap>, ()> {
         const MAGIC_NUMBER: u32 = 0x534D4150;
-        let mut offset = 0x0;
-        let mut signature = MAGIC_NUMBER;
+        const QUERY_SYTEM_ADDRESS_MAP_CMD: u32 = 0xE820;
+        let mut cont_id = 0x0;
+        let mut signature = 0x0;
         let mut len = 0x0;
-        let mut entries = 0x0;
+        let mut entries_cnt = 0x0;
 
         let mut memory_map = MEMORY_MAP.lock();
 
@@ -31,11 +32,11 @@ impl MemoryMap {
             unsafe {
                 asm!(
                     "int 0x15",
-                    inout("eax") 0xE820 => signature,
+                    inout("eax") QUERY_SYTEM_ADDRESS_MAP_CMD => signature,
                     inout("ecx") size_of::<E820MemoryRegion>() => len,
-                    inout("ebx") offset,
+                    inout("ebx") cont_id,
                     in("edx") MAGIC_NUMBER,
-                    in("edi") &memory_map.map[entries],
+                    in("edi") &memory_map.map[entries_cnt],
                     options(nostack)
                 );
             }
@@ -44,20 +45,20 @@ impl MemoryMap {
                 return Err(());
             }
 
-            let entry = &mut memory_map.map[entries];
+            let entry = &mut memory_map.map[entries_cnt];
 
             if len > 0x20 && (entry.acpi_extended_attributes & 0x1) == 0 {
                 continue;
             }
 
-            entries += 1;
+            entries_cnt += 1;
 
-            if offset == 0 || entries > size_of::<MemoryMap>() {
+            if cont_id == 0 || entries_cnt > size_of::<MemoryMap>() {
                 break;
             }
         }
 
-        memory_map.size = entries;
+        memory_map.size = entries_cnt;
 
         Ok(memory_map)
     }

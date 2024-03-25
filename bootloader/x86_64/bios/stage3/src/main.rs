@@ -1,13 +1,16 @@
-//! Stage3 of the bootloader. Protected mode
-//! Cant use BIOS functions anymore so need a small UART driver for text output
+//! This is the stage3 code of the bootloader. This codes executes in protected mode.
+//!
+//! Some notes on protected mode:
+//!     - Cant use BIOS functions anymore. Therefore need a UART driver for text output from this point on
 #![no_std]
 #![no_main]
 use common::{hlt, BiosInfo};
-use core::arch::asm;
-use core::panic::PanicInfo;
+use core::{arch::asm, panic::PanicInfo};
 use lazy_static::lazy_static;
-use x86_64::gdt::{GlobalDescriptorTable, SegmentDescriptor};
-use x86_64::println;
+use x86_64::{
+    gdt::{GlobalDescriptorTable, SegmentDescriptor},
+    println,
+};
 
 mod paging;
 
@@ -82,7 +85,7 @@ fn start(info: &BiosInfo) -> ! {
     // this also switches to long mode
     paging::init();
 
-    // not we are in long mode but in 32-bit compatibility submode, to enter
+    // now we are in long mode but in 32-bit compatibility submode, to enter
     // 64-bit long mode load GDT with 64 bit segment descriptors for code and data
     GDT.clear_interrupts_and_load();
 

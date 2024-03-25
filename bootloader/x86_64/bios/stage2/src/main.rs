@@ -1,9 +1,15 @@
-//! Stage2 of the bootloader. Still in real mode
+//! This module contains the stage2 code of the bootloader. This code executes
+//! in (un)real mode.
+//!
 //! Tasks:
 //! - Switch to unreal mode to be able to access more memory
 //! - Load the next stages into memory by reading a FAT fs
 //! - Query system memory & vesa information
 //! - Switch to protected mode and jump to stage 3
+//!
+//!
+//!
+//!
 #![no_std]
 #![no_main]
 use common::{fail, hlt, mbr, BiosFramebufferInfo, BiosInfo, E820MemoryRegion};
@@ -48,7 +54,7 @@ pub fn panic(info: &PanicInfo) -> ! {
 
 #[no_mangle]
 #[link_section = ".start"]
-pub extern "C" fn _start(disk_number: u8, partition_table_start: *const u8) -> ! {
+pub extern "C" fn _start(disk_number: u16, partition_table_start: *const u8) -> ! {
     start(disk_number, partition_table_start)
 }
 
@@ -69,7 +75,7 @@ fn print_memory_map(map: &MemoryMap) {
     }
 }
 
-fn start(disk_number: u8, partition_table_start: *const u8) -> ! {
+fn start(disk_number: u16, partition_table_start: *const u8) -> ! {
     enter_unreal_mode();
     println!("Stage2 \r\n");
 
@@ -83,7 +89,7 @@ fn start(disk_number: u8, partition_table_start: *const u8) -> ! {
         [mbr::PartitionTableEntry::default(); mbr::PARTITION_TABLE_ENTRY_COUNT];
 
     for i in 0..4 {
-        partition_table[i] = mbr::get_partition(partition_table_raw, i);
+        partition_table[i] = mbr::get_partition_table_entry(partition_table_raw, i);
     }
 
     let fat_partition = partition_table.get(1).unwrap();
