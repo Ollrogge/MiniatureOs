@@ -14,6 +14,7 @@ use x86_64::{
 
 mod paging;
 
+// This is going to be placed in the binary image which is loaded into RAM
 lazy_static! {
     static ref GDT: GlobalDescriptorTable = {
         let mut gdt = GlobalDescriptorTable::new();

@@ -8,6 +8,13 @@ use core::{
 pub const KIB: usize = 1024;
 pub const MIB: usize = KIB * 1024;
 pub const GIB: usize = MIB * 1024;
+pub trait MemoryRegion: Copy + core::fmt::Debug {
+    fn start(&self) -> u64;
+    fn end(&self) -> u64;
+    fn length(&self) -> u64;
+    fn contains(&self, start: u64) -> bool;
+    fn is_usable(&self) -> bool;
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct Region {
@@ -18,6 +25,40 @@ pub struct Region {
 impl Region {
     pub fn new(start: u64, len: u64) -> Region {
         Region { start, size: len }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct PhysicalMemoryRegion {
+    pub start: u64,
+    pub size: u64,
+}
+
+impl PhysicalMemoryRegion {
+    pub fn new(start: u64, size: u64) -> Self {
+        Self { start, size }
+    }
+}
+
+impl MemoryRegion for PhysicalMemoryRegion {
+    fn start(&self) -> u64 {
+        self.start
+    }
+
+    fn end(&self) -> u64 {
+        self.start + self.size
+    }
+
+    fn length(&self) -> u64 {
+        self.size
+    }
+
+    fn contains(&self, address: u64) -> bool {
+        self.start() <= address && address <= self.end()
+    }
+
+    fn is_usable(&self) -> bool {
+        true
     }
 }
 
@@ -137,6 +178,10 @@ pub struct VirtualAddress(u64);
 impl VirtualAddress {
     pub fn new(address: u64) -> Self {
         Self(address)
+    }
+
+    pub fn is_aligned(&self, align: u64) -> bool {
+        self.0 & (align - 1) == 0
     }
 
     pub fn align_down(&self, align: u64) -> VirtualAddress {
@@ -327,12 +372,28 @@ pub struct Page<S: PageSize = Size4KiB> {
 }
 
 impl<S: PageSize> Page<S> {
+    /// Get the page that the virtual address is contained in.
+    ///
+    /// Aligns the address down to the next page boundary
     pub fn containing_address(address: VirtualAddress) -> Self {
         Self {
             address: address.align_down(S::SIZE),
             size: PhantomData,
         }
     }
+
+    /// Get the page corresponding to the address
+    ///
+    /// The addressed passed must be page aligned. Else this function
+    /// panics
+    pub fn for_address(address: VirtualAddress) -> Self {
+        assert!(address.is_aligned(S::SIZE));
+        Self {
+            address,
+            size: PhantomData,
+        }
+    }
+
     pub fn range_inclusive(start: Page<S>, end: Page<S>) -> PageRangeInclusive<S> {
         PageRangeInclusive { start, end }
     }
@@ -387,12 +448,4 @@ impl<S: PageSize> AddAssign<u64> for Page<S> {
     fn add_assign(&mut self, rhs: u64) {
         self.address += S::SIZE * rhs;
     }
-}
-
-pub trait MemoryRegion: Copy + core::fmt::Debug {
-    fn start(&self) -> u64;
-    fn end(&self) -> u64;
-    fn length(&self) -> u64;
-    fn contains(&self, start: u64) -> bool;
-    fn usable(&self) -> bool;
 }

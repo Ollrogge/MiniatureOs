@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 # TODO: change this to e.g. bios, uefi ...
-bootloader_api = {path="../bootloader/api"}
+api = {path="../bootloader/api"}
 x86_64 = {path="../x86_64"}
 
 [dependencies.lazy_static]

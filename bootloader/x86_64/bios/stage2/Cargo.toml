@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 common = {package="common_bios",path="../common"}
 x86_64 = {path="../../../../x86_64"}
+api = {path="../../../api"}
 
 [dependencies.lazy_static]
 version = "*"

@@ -6,9 +6,10 @@
 //! which support resolutions, color depths, and frame buffer organizations
 //! beyond the VGA hardware standard
 use crate::println;
-use common::{const_assert, realmode::RealModePointer, BiosFramebufferInfo, PixelFormat};
-use core::{arch::asm, default::Default, mem::size_of};
-use x86_64::memory::Region;
+use api::{FramebufferInfo, PixelFormat};
+use common::{const_assert, realmode::RealModePointer};
+use core::{arch::asm, borrow::BorrowMut, default::Default, mem::size_of};
+use x86_64::memory::{PhysicalMemoryRegion, Region};
 
 /// All VESA functions return 0x4F in AL if they are supported and use AH as a
 /// status flag, with 0x00 being success. This means that you should check that
@@ -24,8 +25,8 @@ pub struct VbeInfo {
     version: u16,       // should be 0x0300 for VBE 3.0
     oem_string_ptr: RealModePointer,
     capabilities: u32,
-    /// Pointer to an array of video mode ids which one can use to query information
-    /// for that specific mode
+    /// Pointer to an array of video mode ids which can be used to query information
+    /// about a mode
     video_mode_array_pointer: RealModePointer,
     total_memory: u16, // number of 64KB blocks
     reserved: [u8; 512 - 0x14],
@@ -47,12 +48,13 @@ impl Default for VbeInfo {
 }
 
 impl VbeInfo {
-    /// Get VbeInfo
+    /// Gets the VbeInfo
     pub fn get() -> Result<Self, u16> {
+        const GET_CONTROLLER_INFO_CMD: u16 = 0x4f00;
         let mut obj = Self::default();
         let ret;
         unsafe {
-            asm!("push es", "int 0x10", "pop es", inout("ax") 0x4f00u16 => ret, in("di") &mut obj);
+            asm!("push es", "int 0x10", "pop es", inout("ax") GET_CONTROLLER_INFO_CMD => ret, in("di") &mut obj);
         }
 
         match ret {
@@ -87,7 +89,8 @@ impl VbeInfo {
         }
     }
 
-    /// Get the display mode id of the mode closest to the specified parameters
+    /// Gets the display mode id of the mode closest to the specified parameters
+    /// Code is basically copied from: https://wiki.osdev.org/VESA_Video_Modes
     pub fn get_best_mode(&self, width: u16, height: u16, depth: u8) -> Option<u16> {
         let mut best: Option<u16> = None;
         let mut best_pix_diff = u32::MAX;
@@ -135,6 +138,7 @@ impl VbeInfo {
     }
 
     pub fn set_mode(&self, mode: u16) -> Result<(), u16> {
+        const SET_VIDEO_MODE_CMD: u16 = 0x4f02;
         let mut mode = mode;
         // bit 14 is the LFB bit: when set, it enables the linear framebuffer,
         //when clear, software must use bank switching
@@ -146,7 +150,7 @@ impl VbeInfo {
 
         let mut ret: u16;
         unsafe {
-            asm!("push es", "int 0x10", "pop es", inout("ax") 0x4f02u16 => ret, in("bx") mode, options(nomem));
+            asm!("push es", "int 0x10", "pop es", inout("ax") SET_VIDEO_MODE_CMD => ret, in("bx") mode, options(nomem));
         }
 
         match ret {
@@ -239,11 +243,12 @@ impl Default for VbeModeInfo {
 
 impl VbeModeInfo {
     pub fn get(mode: u16) -> Result<Self, u16> {
+        const GET_MODE_INFO_CMD: u16 = 0x4f01;
         let mut obj = Self::default();
         let ptr = RealModePointer(&mut obj as *mut VbeModeInfo as u32);
         let mut ret: u16;
         unsafe {
-            asm!("push es", "mov es, {:x}", "int 0x10", "pop es", in(reg) ptr.segment(), in("di") ptr.offset(), inout("ax") 0x4f01u16 => ret, in("cx") mode);
+            asm!("push es", "mov es, {:x}", "int 0x10", "pop es", in(reg) ptr.segment(), in("di") ptr.offset(), inout("ax") GET_MODE_INFO_CMD => ret, in("cx") mode);
         }
 
         match ret {
@@ -264,15 +269,15 @@ impl VbeModeInfo {
         }
     }
 
-    pub fn to_framebuffer_info(&self) -> BiosFramebufferInfo {
+    pub fn to_framebuffer_info(&self) -> FramebufferInfo {
         let bytes_per_pixel = self.bits_per_pixel / 8;
-        let region = Region::new(
+        let region = PhysicalMemoryRegion::new(
             self.framebuffer.into(),
             u64::from(self.height) * u64::from(self.bytes_per_scanline),
         );
         let stride = self.bytes_per_scanline / u16::from(bytes_per_pixel);
 
-        BiosFramebufferInfo::new(
+        FramebufferInfo::new(
             region,
             self.width,
             self.height,

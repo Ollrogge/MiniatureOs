@@ -1,7 +1,8 @@
 #![no_std]
 #![no_main]
+use api::FramebufferInfo;
 use core::{arch::asm, mem::size_of};
-use x86_64::memory::{MemoryRegion, Region};
+use x86_64::memory::{MemoryRegion, PhysicalMemoryRegion};
 
 pub mod mbr;
 pub mod realmode;
@@ -27,22 +28,23 @@ pub extern "C" fn fail(code: u8) -> ! {
 #[derive(Debug)]
 #[repr(C)]
 pub struct BiosInfo {
-    pub stage4: Region,
-    pub kernel: Region,
-    pub framebuffer: BiosFramebufferInfo,
+    pub stage4: PhysicalMemoryRegion,
+    pub kernel: PhysicalMemoryRegion,
+    pub framebuffer: FramebufferInfo,
     pub last_physical_address: u64,
     // cant pass a pointer here since it will be corrupted when switching
-    // from protected to long mode since pointer size differs
+    // from protected to long mode because pointer size differs
     pub memory_map_address: u64,
     pub memory_map_size: u64,
 }
 
 impl BiosInfo {
     pub fn new(
-        stage4: Region,
-        kernel: Region,
-        framebuffer: BiosFramebufferInfo,
+        stage4: PhysicalMemoryRegion,
+        kernel: PhysicalMemoryRegion,
+        framebuffer: FramebufferInfo,
         last_physical_address: u64,
+        // cant use arr because I dont know how many mem regions there are
         memory_map_address: u64,
         memory_map_size: u64,
     ) -> BiosInfo {
@@ -55,49 +57,6 @@ impl BiosInfo {
             memory_map_size,
         }
     }
-}
-
-#[derive(Clone, Copy, Debug)]
-#[repr(C)]
-pub struct BiosFramebufferInfo {
-    pub region: Region,
-    pub width: u16,
-    pub height: u16,
-    pub bytes_per_pixel: u8,
-    pub stride: u16,
-    pub pixel_format: PixelFormat,
-}
-
-impl BiosFramebufferInfo {
-    pub fn new(
-        region: Region,
-        width: u16,
-        height: u16,
-        bytes_per_pixel: u8,
-        stride: u16,
-        pixel_format: PixelFormat,
-    ) -> BiosFramebufferInfo {
-        BiosFramebufferInfo {
-            region,
-            width,
-            height,
-            bytes_per_pixel,
-            stride,
-            pixel_format,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-#[repr(C)]
-pub enum PixelFormat {
-    Rgb,
-    Bgr,
-    Unknown {
-        red_position: u8,
-        green_position: u8,
-        blue_position: u8,
-    },
 }
 
 #[allow(dead_code)]
@@ -118,7 +77,7 @@ pub enum E820MemoryRegionType {
 #[repr(C)]
 pub struct E820MemoryRegion {
     pub start: u64,
-    pub length: u64,
+    pub size: u64,
     pub typ: E820MemoryRegionType,
     pub acpi_extended_attributes: u32,
 }
@@ -128,10 +87,22 @@ impl E820MemoryRegion {
     pub const fn empty() -> Self {
         Self {
             start: 0,
-            length: 0,
+            size: 0,
             typ: E820MemoryRegionType::Unusable,
             acpi_extended_attributes: 0,
         }
+    }
+}
+
+impl Into<PhysicalMemoryRegion> for E820MemoryRegion {
+    fn into(self) -> PhysicalMemoryRegion {
+        PhysicalMemoryRegion::new(self.start, self.size)
+    }
+}
+
+impl Into<PhysicalMemoryRegion> for &E820MemoryRegion {
+    fn into(self) -> PhysicalMemoryRegion {
+        PhysicalMemoryRegion::new(self.start, self.size)
     }
 }
 
@@ -141,18 +112,18 @@ impl MemoryRegion for E820MemoryRegion {
     }
 
     fn end(&self) -> u64 {
-        self.start + self.length
+        self.start + self.size
     }
 
     fn length(&self) -> u64 {
-        self.length
+        self.size
     }
 
     fn contains(&self, address: u64) -> bool {
         self.start() <= address && address <= self.end()
     }
 
-    fn usable(&self) -> bool {
+    fn is_usable(&self) -> bool {
         self.typ == E820MemoryRegionType::Normal
     }
 }

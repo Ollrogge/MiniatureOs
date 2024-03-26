@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bootloader_api= {path="../../../api"}
+api= {path="../../../api"}
 x86_64 = {path="../../../../x86_64"}
 common = {package="common_bios", path="../common"}
 elfloader = "*"

@@ -28,7 +28,7 @@ where
         let mut current_region = None;
         while let Some(region) = memory_map.next() {
             if region.contains(frame.address.as_u64()) {
-                if !region.usable() {
+                if !region.is_usable() {
                     panic!("Tried to initialize allocator at unusable address");
                 }
                 current_region = Some(region);
@@ -58,7 +58,7 @@ where
 
         if !current_region.contains(next_frame.address.as_u64()) {
             while let Some(region) = self.memory_map.next() {
-                if !region.usable() {
+                if !region.is_usable() {
                     continue;
                 }
 

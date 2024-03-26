@@ -12,12 +12,12 @@
 //!
 #![no_std]
 #![no_main]
-use common::{fail, hlt, mbr, BiosFramebufferInfo, BiosInfo, E820MemoryRegion};
+use common::{fail, hlt, mbr, BiosInfo, E820MemoryRegion};
 use core::{panic::PanicInfo, slice};
 use lazy_static::lazy_static;
 use x86_64::{
     gdt::{GlobalDescriptorTable, SegmentDescriptor},
-    memory::Region,
+    memory::PhysicalMemoryRegion,
 };
 
 mod dap;
@@ -35,6 +35,7 @@ const STAGE3_DST: *mut u8 = 0x0010_0000 as *mut u8;
 const STAGE4_DST: *mut u8 = 0x0012_0000 as *mut u8;
 const KERNEL_DST: *mut u8 = 0x0020_0000 as *mut u8;
 
+// This is going to be placed in the binary image which is loaded into RAM
 lazy_static! {
     static ref GDT: GlobalDescriptorTable = {
         let mut gdt = GlobalDescriptorTable::new();
@@ -70,7 +71,7 @@ fn print_memory_map(map: &MemoryMap) {
     for region in map.iter() {
         println!(
             "Memory region, start: {:#x}, length: {:#x}, type: {:?}, attributes: {:#x} ",
-            region.start, region.length, region.typ, region.acpi_extended_attributes
+            region.start, region.size, region.typ, region.acpi_extended_attributes
         );
     }
 }
@@ -144,8 +145,8 @@ fn start(disk_number: u16, partition_table_start: *const u8) -> ! {
 
     // todo: kernel info
     let bios_info = BiosInfo {
-        stage4: Region::new(STAGE4_DST as u64, stage4_len as u64),
-        kernel: Region::new(KERNEL_DST as u64, kernel_len as u64),
+        stage4: PhysicalMemoryRegion::new(STAGE4_DST as u64, stage4_len as u64),
+        kernel: PhysicalMemoryRegion::new(KERNEL_DST as u64, kernel_len as u64),
         framebuffer: mode_info.to_framebuffer_info(),
         last_physical_address: KERNEL_DST as u64 + kernel_len as u64,
         memory_map_address: memory_map.map[0..memory_map.size].as_ptr() as u64,

@@ -5,20 +5,22 @@
 use core::{arch::asm, panic::PanicInfo, ptr, slice};
 mod elf;
 use crate::elf::KernelLoader;
-use bootloader_api::BootInfo;
+use api::{BootInfo, PhysicalMemoryRegions};
 use common::{hlt, BiosInfo, E820MemoryRegion};
+use core::alloc::Layout;
 use x86_64::{
     frame_allocator::{BumpFrameAllocator, FrameAllocator},
     gdt::{self, SegmentDescriptor},
     memory::{
-        Address, MemoryRegion, Page, PageSize, PhysicalAddress, PhysicalFrame, VirtualAddress, KIB,
+        Address, MemoryRegion, Page, PageSize, PhysicalAddress, PhysicalFrame,
+        PhysicalMemoryRegion, VirtualAddress, KIB,
     },
     paging::{FourLevelPageTable, Mapper, PageTable, PageTableEntryFlags},
     println,
     register::{Cr0, Cr0Flags, Efer, EferFlags},
 };
 
-// hardcoded for now;
+// hardcoded for now
 const KERNEL_VIRTUAL_BASE: u64 = 0xffffffff80000000;
 const KERNEL_STACK_TOP: u64 = 0xffffffff00000000;
 const KERNEL_STACK_SIZE: usize = 2 * KIB;
@@ -122,7 +124,7 @@ where
     gdt.load();
 
     // we dont need to reset the segment registers, since they still contain the
-    // correct indexes. We just exchanged the descriptors.
+    // correct indexes. We only exchanged the descriptors.
 
     page_table
         .identity_map(frame, PageTableEntryFlags::PRESENT, frame_allocator)
@@ -132,26 +134,54 @@ where
 fn allocate_and_map_boot_info<A, M, S>(
     frame_allocator: &mut A,
     page_table: &mut M,
-    info: &BootInfo,
+    info: &BiosInfo,
+    memory_map: &[E820MemoryRegion],
 ) -> VirtualAddress
 where
     A: FrameAllocator<S>,
     M: Mapper<S>,
     S: PageSize,
 {
-    assert!(
-        core::mem::size_of::<BootInfo>() <= S::SIZE.try_into().unwrap(),
-        "Boot info bigger than S::SIZE"
+    let mut boot_info_layout = Layout::new::<BootInfo>();
+    let usable_memory_regions_amount = memory_map.iter().filter(|r| r.is_usable()).count();
+    println!(
+        "Usable memory regions amount: {}",
+        usable_memory_regions_amount
     );
+    let memory_regions_layout =
+        Layout::array::<PhysicalMemoryRegion>(usable_memory_regions_amount).unwrap();
+    let (combined_layout, memory_regions_offset) =
+        boot_info_layout.extend(memory_regions_layout).unwrap();
+
+    // if this happens need a better allocator which can allocate > 1 frame
+    // and ensure they are contiguous
+    assert!(
+        combined_layout.size() <= S::SIZE.try_into().unwrap(),
+        "Required memory for boot info is bigger than page size"
+    );
+
     let frame = frame_allocator
         .allocate_frame()
         .expect("Failed to allocate frame for boot info");
 
-    unsafe { ptr::write(frame.address.as_mut_ptr(), info) };
+    // write memory regions information to allocated frame
+    let memory_regions_ptr: *mut PhysicalMemoryRegion =
+        (frame.address + memory_regions_offset).as_mut_ptr();
+
+    for (idx, mem_region) in memory_map.iter().filter(|r| r.is_usable()).enumerate() {
+        let mem_region: PhysicalMemoryRegion = mem_region.into();
+        let ptr = unsafe { memory_regions_ptr.add(idx) };
+        unsafe { ptr::write(ptr, mem_region) }
+    }
+
+    // write bootinfo to allocated frame
+    let memory_regions =
+        PhysicalMemoryRegions::new(memory_regions_ptr, usable_memory_regions_amount);
+    let boot_info = BootInfo::new(info.kernel, info.framebuffer, memory_regions);
+    unsafe { ptr::write(frame.address.as_mut_ptr(), boot_info) };
 
     let virtual_address = VirtualAddress::new(frame.address.as_u64());
-
-    let page = Page::containing_address(virtual_address);
+    let page = Page::for_address(virtual_address);
 
     page_table
         .map_to(frame, page, PageTableEntryFlags::PRESENT, frame_allocator)
@@ -211,8 +241,8 @@ fn start(info: &BiosInfo) -> ! {
 
     identity_map_context_switch_function(&mut allocator, &mut page_table);
 
-    let boot_info = BootInfo::new(info.kernel);
-    let boot_info_address = allocate_and_map_boot_info(&mut allocator, &mut page_table, &boot_info);
+    let boot_info_address =
+        allocate_and_map_boot_info(&mut allocator, &mut page_table, &info, memory_map);
 
     initialize_and_map_gdt(&mut allocator, &mut page_table);
 
