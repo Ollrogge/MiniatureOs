@@ -3,12 +3,12 @@
 use api::{BootInfo, PhysicalMemoryRegions};
 use core::{arch::asm, panic::PanicInfo};
 use x86_64::{
+    instructions::int3,
     memory::{MemoryRegion, PhysicalMemoryRegion},
     println,
     register::Cr0,
 };
-
-static mut TEST: [u8; 0xabc123] = [0; 0xabc123];
+mod interrupts;
 
 #[panic_handler]
 pub fn panic(info: &PanicInfo) -> ! {
@@ -34,6 +34,11 @@ fn start(info: &'static BootInfo) -> ! {
     println!("Hello from kernel <3");
 
     print_memory_map(&info.memory_regions);
+
+    interrupts::init();
+    println!("Interrupts initialized");
+
+    int3();
 
     loop {}
 }

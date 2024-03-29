@@ -2,7 +2,16 @@
 use crate::memory::VirtualAddress;
 use bit_field::BitField;
 use bitflags::bitflags;
-use core::{arch::asm, ptr};
+use core::{arch::asm, convert::From, ptr};
+
+#[derive(Debug, Clone, Copy)]
+pub struct SegmentSelector(pub u16);
+
+impl From<u16> for SegmentSelector {
+    fn from(val: u16) -> Self {
+        Self(val)
+    }
+}
 
 bitflags! {
     /// Combines the access byte and flags of a segment descriptor

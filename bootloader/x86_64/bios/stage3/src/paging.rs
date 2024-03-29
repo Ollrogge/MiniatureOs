@@ -32,7 +32,7 @@ pub fn init() {
 //
 // Use huge pages to make the loading faster, else .bss is big which takes a lot of time
 // to load into memory from FAT
-// map 10 GiB in total
+// identity map 10 GiB in total
 fn create_mappings() {
     // can be sure that the addresses of the tables work since stage3 is mapped at 1MiB
     let flags = PageTableEntryFlags::WRITABLE | PageTableEntryFlags::PRESENT;

@@ -58,16 +58,18 @@ where
     // https://dram.page/p/relative-relocs-explained/
     // Basically means: Please fill in the value of (virtual_base + addend) at offset from base of executable
     fn handle_relative_relocation(&mut self, entry: RelocationEntry) {
-        let value = self.virtual_base
+        let value_bytes = (self.virtual_base
             + entry
                 .addend
-                .expect("Relative relocation: addend value = None");
+                .expect("Relative relocation: addend value = None"))
+        .to_ne_bytes();
 
         // the relocation may span two pages
         // (e.g. 4 bytes of value on page A and 4 bytes on page B)
         let virtual_address = VirtualAddress::new(self.virtual_base + entry.offset);
         let start_page = Page::containing_address(virtual_address);
-        let end_page = Page::containing_address(virtual_address + mem::size_of::<u64>());
+        let end_page = Page::containing_address(virtual_address + value_bytes.len());
+        let mut bytes_written = 0;
         for page in Page::range_inclusive(start_page, end_page) {
             // entry.offset if relative to virtual base, so we need to first map
             // the page corresponding to virtual base to its physical frame and then
@@ -76,12 +78,35 @@ where
                 .page_table
                 .translate(page)
                 .expect("Relative relocation: Failed to map page to frame");
-            let end_of_page = page.address + page.size() - 1;
-            let offset = (cmp::min(virtual_address, end_of_page) - page.address.as_u64()).as_u64();
 
-            let address = VirtualAddress::new(frame.address.as_u64() + offset);
-            let ptr = address.as_mut_ptr();
-            unsafe { ptr::write(ptr, value.to_ne_bytes()) };
+            // we are on the first page
+            let offset = if virtual_address > page.address {
+                (virtual_address - page.address) as usize
+            // we are on the second page
+            } else {
+                0
+            };
+
+            // Write spans two pages, calculate amount of bytes for first page
+            let bytes_to_write = if virtual_address + value_bytes.len() > page.end() {
+                (page.end() - virtual_address) as usize
+            // Either we write the full 8 bytes, or the rest of the value on the second page
+            } else {
+                value_bytes.len() - bytes_written
+            };
+
+            let ptr =
+                VirtualAddress::new(frame.address.as_u64() + offset as u64).as_mut_ptr::<u8>();
+
+            // Calculate the slice of value_bytes to write
+            let write_slice = &value_bytes[bytes_written..(bytes_written + bytes_to_write)];
+
+            let address =
+                VirtualAddress::new(frame.address.as_u64() + offset as u64).as_mut_ptr::<u8>();
+
+            unsafe { ptr::copy_nonoverlapping(write_slice.as_ptr(), address, bytes_to_write) };
+
+            bytes_written += bytes_to_write;
         }
     }
 }
@@ -138,10 +163,19 @@ where
             // Cant get around the loading binary blob into memory thing for now ig,
             // since we only have access to BIOS disk firmware in lower stages
 
+            // Map data into memory
             if header.file_size() > 0 {
                 for frame in PhysicalFrame::range_inclusive(start_frame, end_frame) {
                     let offset = frame - start_frame;
-                    let page: Page<S> = start_page + offset;
+                    // 1:1 mapping
+                    let page = start_page + offset;
+                    /*
+                    println!(
+                        "Map: {:x} -> {:x}",
+                        frame.address.as_u64(),
+                        page.address.as_u64()
+                    );
+                    */
                     self.page_table
                         .map_to(frame, page, flags, self.frame_allocator)
                         .expect("Failed to map section");
@@ -168,7 +202,8 @@ where
                         .expect("Failed to map .bss section");
                 }
             } else if header.mem_size() > 0 && header.file_size() > 0 {
-                // .bss that is partially included in ELF ? never seen it
+                // .bss that is partially included in ELF (has an actual size) ?
+                // never seen it
                 unimplemented!(
                     "Load kernel elf: Section with both mem_size and file size bigger 0"
                 );
@@ -192,6 +227,7 @@ where
     }
 
     fn load(&mut self, flags: Flags, base: VAddr, region: &[u8]) -> Result<(), ElfLoaderErr> {
+        //println!("Load called at {:#x}, flags = {}", base, flags);
         Ok(())
     }
 

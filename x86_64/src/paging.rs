@@ -15,6 +15,7 @@ bitflags! {
     /// Possible flags for a page table entry.
     #[derive(Clone, Copy)]
     pub struct PageTableEntryFlags: u64 {
+        const NONE = 0;
         /// Specifies whether the mapped frame or page table is loaded in memory.
         const PRESENT =         1;
         /// Controls whether writes to the mapped frames are allowed.

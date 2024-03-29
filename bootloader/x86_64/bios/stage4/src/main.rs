@@ -23,7 +23,7 @@ use x86_64::{
 // hardcoded for now
 const KERNEL_VIRTUAL_BASE: u64 = 0xffffffff80000000;
 const KERNEL_STACK_TOP: u64 = 0xffffffff00000000;
-const KERNEL_STACK_SIZE: usize = 2 * KIB;
+const KERNEL_STACK_SIZE: usize = 0x40 * KIB;
 
 #[panic_handler]
 pub fn panic(info: &PanicInfo) -> ! {
@@ -46,6 +46,7 @@ fn context_switch(page_table: u64, stack_top: u64, entry_point: u64, boot_info: 
     unsafe {
         asm!(
             "xor rbp, rbp",
+            // Writing to cr3, will invalidate the whole tlb so no need to flush
             "mov cr3, {}",
             "mov rsp, {}",
             "push 0",
@@ -83,6 +84,22 @@ where
             .map_to(frame, page, flags, frame_allocator)
             .expect("Failed to map stack");
     }
+
+    // catch kernel stack overflows
+    let guard_page = Page::containing_address(start_page.address - S::SIZE);
+    assert!(guard_page != start_page);
+    let frame = frame_allocator
+        .allocate_frame()
+        .expect("Failed to allocate frame for guard page");
+
+    page_table
+        .map_to(
+            frame,
+            guard_page,
+            PageTableEntryFlags::NONE,
+            frame_allocator,
+        )
+        .expect("Failed to map guard page");
 
     end_page.address
 }
@@ -144,10 +161,6 @@ where
 {
     let mut boot_info_layout = Layout::new::<BootInfo>();
     let usable_memory_regions_amount = memory_map.iter().filter(|r| r.is_usable()).count();
-    println!(
-        "Usable memory regions amount: {}",
-        usable_memory_regions_amount
-    );
     let memory_regions_layout =
         Layout::array::<PhysicalMemoryRegion>(usable_memory_regions_amount).unwrap();
     let (combined_layout, memory_regions_offset) =
@@ -247,7 +260,6 @@ fn start(info: &BiosInfo) -> ! {
     initialize_and_map_gdt(&mut allocator, &mut page_table);
 
     // todo: detect RSDP (Root System Description Pointer)
-
     println!(
         "Switching to kernel entry point at {:#x}",
         kernel_entry_point.as_u64()

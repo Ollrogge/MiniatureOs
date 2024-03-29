@@ -207,3 +207,30 @@ impl Cr0 {
         unsafe { asm!("mov cr0, {}", in(reg) val as usize, options(nostack, preserves_flags)) };
     }
 }
+
+/// Code segment register
+pub struct CS;
+
+impl CS {
+    /// Reads the code segment register
+    pub fn read() -> u16 {
+        let mut cs: u16;
+        unsafe { asm!("mov {:x}, cs", out(reg) cs, options(nostack, nomem, preserves_flags)) };
+        cs
+    }
+
+    /// Writes to the code segment register
+    ///
+    /// # Safety
+    ///
+    /// Directly writing to the code segment register can lead to undefined
+    /// behavior if the value is wrong
+    pub unsafe fn write(val: u16) {
+        unsafe {
+            asm!(
+                "mov cs, {:x}", in(reg) val,
+                options(nostack, nomem, preserves_flags)
+            )
+        };
+    }
+}

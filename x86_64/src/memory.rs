@@ -1,3 +1,4 @@
+use crate::println;
 use bit_field::BitField;
 use core::{
     fmt::{self, Display, Formatter, LowerHex, Result},
@@ -8,6 +9,7 @@ use core::{
 pub const KIB: usize = 1024;
 pub const MIB: usize = KIB * 1024;
 pub const GIB: usize = MIB * 1024;
+
 pub trait MemoryRegion: Copy + core::fmt::Debug {
     fn start(&self) -> u64;
     fn end(&self) -> u64;
@@ -154,9 +156,9 @@ impl Sub<u64> for PhysicalAddress {
 }
 
 impl Sub<PhysicalAddress> for PhysicalAddress {
-    type Output = Self;
-    fn sub(self, rhs: PhysicalAddress) -> Self::Output {
-        Self(self.0.checked_sub(rhs.0).unwrap())
+    type Output = u64;
+    fn sub(self, rhs: PhysicalAddress) -> u64 {
+        self.0.checked_sub(rhs.0).unwrap()
     }
 }
 
@@ -246,6 +248,15 @@ impl Sub<u64> for VirtualAddress {
     type Output = Self;
     fn sub(self, rhs: u64) -> Self::Output {
         Self(self.0.checked_sub(rhs).unwrap())
+    }
+}
+
+// Just makes more sense that subbing two addresses returns the distance between them,
+// not another address
+impl Sub<VirtualAddress> for VirtualAddress {
+    type Output = u64;
+    fn sub(self, rhs: VirtualAddress) -> u64 {
+        self.as_u64().checked_sub(rhs.as_u64()).unwrap()
     }
 }
 
@@ -400,6 +411,10 @@ impl<S: PageSize> Page<S> {
 
     pub fn size(self) -> u64 {
         S::SIZE
+    }
+
+    pub fn end(self) -> VirtualAddress {
+        self.address + S::SIZE
     }
 }
 
