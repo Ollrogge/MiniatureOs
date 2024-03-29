@@ -155,14 +155,15 @@ fn build_stage4() -> Result<PathBuf> {
 }
 
 pub fn build_bios() {
-    //println!("cargo:rerun-if-changed=../../x86_64");
+    println!("cargo:rerun-if-changed=../x86_64");
 
     let mbr_path = build_mbr().unwrap();
     let stage2_path = build_stage2().unwrap();
     let stage3_path = build_stage3().unwrap();
     let stage4_path = build_stage4().unwrap();
 
-    let src_dir = Path::new("../../x86_64/src");
+    /*
+    let src_dir = Path::new("../x86_64/src");
     // Recursively add `cargo:rerun-if-changed` for all files in the directory
     assert!(src_dir.exists() && src_dir.is_dir());
     for entry in walkdir::WalkDir::new(src_dir) {
@@ -171,6 +172,7 @@ pub fn build_bios() {
             println!("cargo:rerun-if-changed={}", entry.path().display());
         }
     }
+    */
 
     println!(
         "cargo:rustc-env=BIOS_BOOT_SECTOR_PATH={}",
