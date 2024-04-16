@@ -91,6 +91,7 @@ pub fn enter_protected_mode_and_jump_to_stage3(entry_point: *const u8, info: &Bi
         // entry in the Global Descriptor Table (GDT) that defines the properties
         // of the segment to which control is being transferred
         // Second argument is the jump target. Label "2" in this case
+        // changes the value in CS register
         asm!("ljmp $0x8, $2f", options(att_syntax));
         asm!(
             "2:",

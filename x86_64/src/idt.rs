@@ -59,7 +59,7 @@ impl InterruptDescriptor {
     pub fn missing() -> Self {
         Self {
             pointer_low: 0,
-            segment_selector: SegmentSelector(0),
+            segment_selector: SegmentSelector::new(0, PrivilegeLevel::Ring0),
             options: InterruptDescriptorOptions::default(),
             pointer_middle: 0,
             pointer_high: 0,
@@ -67,7 +67,7 @@ impl InterruptDescriptor {
         }
     }
 
-    pub fn set_handler_fn(&mut self, handler: HandlerFunc) {
+    pub fn set_handler_function(&mut self, handler: HandlerFunc) {
         let handler_address = handler as u64;
         self.pointer_low = handler_address as u16;
         self.pointer_middle = (handler_address >> 16) as u16;
@@ -79,9 +79,12 @@ impl InterruptDescriptor {
     }
 }
 
+/// IDT descriptor which will be loaded into the IDT register
 #[repr(C, packed)]
 pub struct InterruptTableDescriptor {
-    limit: u16,
+    /// The size of the idt - 1 in bytes
+    size: u16,
+    /// Address of the idt
     base: u64,
 }
 
@@ -120,9 +123,12 @@ pub struct InterruptDescriptorTable {
 }
 
 impl InterruptDescriptorTable {
-    pub fn load(&self) {
+    // Static lifetime to make sure idt will live long enough and not e.g.
+    // be initialized on the stack stack inside a function which causes
+    // undefined behavior when the function returns
+    pub fn load(&'static self) {
         let desc = InterruptTableDescriptor {
-            limit: (size_of::<Self>() - 1) as u16,
+            size: (size_of::<Self>() - 1) as u16,
             base: self as *const _ as u64,
         };
 

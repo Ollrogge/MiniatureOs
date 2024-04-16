@@ -10,11 +10,12 @@
 //!     - real = all addresses correspond to real locations in memory
 //!     - access to BIOS functions
 //!     - no support for memory protection, code privilege levels, paging, multitasking
-//!     - segment registers hold direct segment addresses. Addressing works based on
-//!     segment selectors + an offset. Physical address = segment << 4 + offset.
-//!     Since both segment and offset are 16 bit values, the maximum addressable
-//!     address is 1MiB. (actually max is 0xFFFF×16 + 0xFFFF=0x10FFEF, which is 1,114,095),
-//!     but addresses wrap around so 1MiB is limit
+//!     - segment registers hold direct segment addresses.
+//!     - Segmentation: Addressing works based on segment selectors + an offset.
+//!     Physical address = segment * 16 + offset. Since both segment and offset
+//!     are 16 bit values, the maximum addressable address is 1MiB.
+//!     (actually max is 0xFFFF×16 + 0xFFFF=0x10FFEF, which is 1,114,095), but
+//!     addresses wrap around so 1MiB is limit
 
 use core::{arch::global_asm, slice, usize};
 

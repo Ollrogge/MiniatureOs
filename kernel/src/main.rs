@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+#![feature(naked_functions)]
 use api::{BootInfo, PhysicalMemoryRegions};
 use core::{arch::asm, panic::PanicInfo};
 use x86_64::{

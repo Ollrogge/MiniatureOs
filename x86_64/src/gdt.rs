@@ -1,11 +1,17 @@
 //! Global Descriptor Table definitions
-use crate::memory::VirtualAddress;
+use crate::{memory::VirtualAddress, PrivilegeLevel};
 use bit_field::BitField;
 use bitflags::bitflags;
 use core::{arch::asm, convert::From, ptr};
 
 #[derive(Debug, Clone, Copy)]
-pub struct SegmentSelector(pub u16);
+pub struct SegmentSelector(u16);
+
+impl SegmentSelector {
+    pub fn new(idx: u16, rpl: PrivilegeLevel) -> Self {
+        SegmentSelector(idx << 3 | rpl as u16)
+    }
+}
 
 impl From<u16> for SegmentSelector {
     fn from(val: u16) -> Self {

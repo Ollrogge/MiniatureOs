@@ -49,6 +49,12 @@ fn jump_to_stage4(info: &BiosInfo) {
             info = in(reg) info as *const _ as u32,
             entry_point = in(reg) info.stage4.start as u32,
         );
+        // Long jump. Long jumps can jump to an address in a different code segment.
+        // First argument specifies the segment selector which points points to an
+        // entry in the Global Descriptor Table (GDT) that defines the properties
+        // of the segment to which control is being transferred
+        // Second argument is the jump target. Label "2" in this case
+        // changes the value in CS register
         asm!("ljmp $0x8, $2f", "2:", options(att_syntax));
         asm!(
             ".code64",
