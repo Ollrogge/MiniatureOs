@@ -1,7 +1,7 @@
 //! This module implements functionality for the x86 interrupt descriptor table
 //!
 //!
-use crate::{gdt::SegmentSelector, println, register::CS, PrivilegeLevel};
+use crate::{const_assert, gdt::SegmentSelector, println, register::CS, PrivilegeLevel};
 use bit_field::BitField;
 use core::{arch::asm, default::Default, mem::size_of};
 
@@ -121,6 +121,10 @@ pub struct InterruptDescriptorTable {
     reserved_3: InterruptDescriptor,
     interrupts: [InterruptDescriptor; 256 - 32],
 }
+const_assert!(
+    size_of::<InterruptDescriptorTable>() == 256 * 0x10,
+    "IDT has invalid size"
+);
 
 impl InterruptDescriptorTable {
     // Static lifetime to make sure idt will live long enough and not e.g.
@@ -131,6 +135,9 @@ impl InterruptDescriptorTable {
             size: (size_of::<Self>() - 1) as u16,
             base: self as *const _ as u64,
         };
+
+        let val = desc.base;
+        println!("Idt addr: {:x}", val);
 
         unsafe {
             lidt(&desc);
