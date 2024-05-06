@@ -143,6 +143,7 @@ where
     // we dont need to reset the segment registers, since they still contain the
     // correct indexes. We only exchanged the descriptors.
 
+    // TODO: why is this actually needed ? cpu accesses the gdt based on physical address
     page_table
         .identity_map(frame, PageTableEntryFlags::PRESENT, frame_allocator)
         .expect("Identity mapping gdt failed");

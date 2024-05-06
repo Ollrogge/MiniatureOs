@@ -31,6 +31,28 @@ fn print_memory_map(map: &PhysicalMemoryRegions) {
     }
 }
 
+fn trigger_int3() {
+    int3();
+}
+
+fn trigger_invalid_opcode() {
+    unsafe {
+        asm!("ud2");
+    }
+}
+
+fn trigger_divide_by_zero() {
+    unsafe {
+        asm!("mov rax, {0:r}", "mov rcx, {1:r}", "div rcx", in(reg) 4, in(reg) 0);
+    }
+}
+
+// using *mut u64 here causes an infinite loop since address is not 8 byte aligned
+// todo: this is weird ?, can cause infinite loops at other places ?
+fn trigger_page_fault() {
+    unsafe { *(0xdeabeef as *mut u8) = 42 };
+}
+
 fn start(info: &'static BootInfo) -> ! {
     println!("Hello from kernel <3");
 
@@ -39,7 +61,13 @@ fn start(info: &'static BootInfo) -> ! {
     interrupts::init();
     println!("Interrupts initialized");
 
-    int3();
+    // invalid opcode
+    /*
+     */
+    //trigger_int3();
+    trigger_page_fault();
+
+    println!("Did not crash, successfully returned from int3");
 
     loop {}
 }
