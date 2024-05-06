@@ -2,6 +2,7 @@
 //!
 //! Some notes on protected mode:
 //!     - Cant use BIOS functions anymore. Therefore need a UART driver for text output from this point on
+//!     - Segment registers are now interpreted as indexes into the GDT (bits 3-15)
 #![no_std]
 #![no_main]
 use common::{hlt, BiosInfo};
