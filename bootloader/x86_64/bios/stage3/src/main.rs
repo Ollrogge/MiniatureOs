@@ -39,7 +39,7 @@ fn jump_to_stage4(info: &BiosInfo) {
             "and esp, 0xffffff00",
             // :e => specify that we want to use 32 bit registers
             // else the push would be 16 bit ig since we are still in real mode
-            // push arguments (extended to 64 bit)
+            // push arguments (extended to 64 bit), therefore we push 0 twice
             // little-endian, stack grows downwards to push bits at higher address first
             "push 0",
             "push {info:e}",

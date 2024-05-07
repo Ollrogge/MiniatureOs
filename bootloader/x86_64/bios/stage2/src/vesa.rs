@@ -9,7 +9,7 @@ use crate::println;
 use api::{FramebufferInfo, PixelFormat};
 use common::{const_assert, realmode::RealModePointer};
 use core::{arch::asm, borrow::BorrowMut, default::Default, mem::size_of};
-use x86_64::memory::{PhysicalMemoryRegion, Region};
+use x86_64::memory::{PhysicalMemoryRegion, PhysicalMemoryRegionType};
 
 /// All VESA functions return 0x4F in AL if they are supported and use AH as a
 /// status flag, with 0x00 being success. This means that you should check that
@@ -274,6 +274,7 @@ impl VbeModeInfo {
         let region = PhysicalMemoryRegion::new(
             self.framebuffer.into(),
             u64::from(self.height) * u64::from(self.bytes_per_scanline),
+            PhysicalMemoryRegionType::Reserved,
         );
         let stride = self.bytes_per_scanline / u16::from(bytes_per_pixel);
 

@@ -47,6 +47,11 @@ fn trigger_divide_by_zero() {
     }
 }
 
+// should cause a pagefault because guard page is hit
+fn stack_overflow() {
+    stack_overflow()
+}
+
 // using *mut u64 here causes an infinite loop since address is not 8 byte aligned
 // todo: this is weird ?, can cause infinite loops at other places ?
 fn trigger_page_fault() {
@@ -64,10 +69,12 @@ fn start(info: &'static BootInfo) -> ! {
     // invalid opcode
     /*
      */
-    //trigger_int3();
+    trigger_int3();
     trigger_page_fault();
 
     println!("Did not crash, successfully returned from int3");
+
+    //stack_overflow();
 
     loop {}
 }

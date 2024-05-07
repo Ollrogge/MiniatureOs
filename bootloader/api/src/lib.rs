@@ -2,9 +2,10 @@
 use core::ops::{Deref, DerefMut};
 use x86_64::memory::{MemoryRegion, PhysicalMemoryRegion};
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 #[repr(C)]
 pub enum PixelFormat {
+    #[default]
     Rgb,
     Bgr,
     Unknown {
@@ -14,8 +15,9 @@ pub enum PixelFormat {
     },
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 #[repr(C)]
+#[repr(align(8))]
 pub struct FramebufferInfo {
     pub region: PhysicalMemoryRegion,
     pub width: u16,

@@ -30,15 +30,31 @@ impl Region {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[allow(dead_code)]
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C)]
+pub enum PhysicalMemoryRegionType {
+    /// Either reserved by firmware or used by kernel
+    #[default]
+    Reserved,
+    /// Memory that can be freely used by OS
+    Free,
+}
+
+// ensure 8 byte alignment so it works between the different cpu modes where we have
+// 2 byte, 4 byte and 8 byte alignments
+#[derive(Clone, Copy, Debug, Default)]
+#[repr(C)]
+#[repr(align(8))]
 pub struct PhysicalMemoryRegion {
     pub start: u64,
     pub size: u64,
+    pub typ: PhysicalMemoryRegionType,
 }
 
 impl PhysicalMemoryRegion {
-    pub fn new(start: u64, size: u64) -> Self {
-        Self { start, size }
+    pub fn new(start: u64, size: u64, typ: PhysicalMemoryRegionType) -> Self {
+        Self { start, size, typ }
     }
 }
 
@@ -60,7 +76,7 @@ impl MemoryRegion for PhysicalMemoryRegion {
     }
 
     fn is_usable(&self) -> bool {
-        true
+        self.typ == PhysicalMemoryRegionType::Free
     }
 }
 
@@ -307,6 +323,14 @@ impl<S: PageSize> PhysicalFrame<S> {
 
     pub fn start(&self) -> u64 {
         self.address.as_u64()
+    }
+
+    pub fn end(&self) -> u64 {
+        self.start() + self.size() as u64
+    }
+
+    pub fn address(&self) -> PhysicalAddress {
+        self.address
     }
 
     pub fn size(&self) -> usize {

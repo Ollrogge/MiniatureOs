@@ -17,7 +17,8 @@ use core::{panic::PanicInfo, slice};
 use lazy_static::lazy_static;
 use x86_64::{
     gdt::{GlobalDescriptorTable, SegmentDescriptor},
-    memory::PhysicalMemoryRegion,
+    memory::{MemoryRegion, PhysicalMemoryRegion, PhysicalMemoryRegionType},
+    mutex::Mutex,
 };
 
 mod dap;
@@ -34,6 +35,10 @@ use protected_mode::*;
 const STAGE3_DST: *mut u8 = 0x0010_0000 as *mut u8;
 const STAGE4_DST: *mut u8 = 0x0012_0000 as *mut u8;
 const KERNEL_DST: *mut u8 = 0x0020_0000 as *mut u8;
+
+lazy_static! {
+    static ref BIOS_INFO: Mutex<BiosInfo> = Mutex::new(BiosInfo::default());
+}
 
 // This is going to be placed in the binary image which is loaded into RAM
 lazy_static! {
@@ -141,17 +146,47 @@ fn start(disk_number: u16, partition_table_start: *const u8) -> ! {
         .expect("Unable to get vesa mode");
     let mode_info = vesa::VbeModeInfo::get(mode).expect("Failed to get vesa mode info");
 
+    // println wont work anymore after this call
+    // TODO: forgot why
     vesa_info.set_mode(mode).expect("Failed to set vesa mode");
 
     // todo: kernel info
+    let mut bios_info = BIOS_INFO.lock();
+
+    bios_info.stage4 = PhysicalMemoryRegion::new(
+        STAGE4_DST as u64,
+        stage4_len as u64,
+        PhysicalMemoryRegionType::Reserved,
+    );
+    bios_info.kernel = PhysicalMemoryRegion::new(
+        KERNEL_DST as u64,
+        kernel_len as u64,
+        PhysicalMemoryRegionType::Reserved,
+    );
+    bios_info.framebuffer = mode_info.to_framebuffer_info();
+    bios_info.last_physical_address = KERNEL_DST as u64 + kernel_len as u64;
+    bios_info.memory_map_address = memory_map.map.as_ptr() as u64;
+    bios_info.memory_map_size = memory_map.size as u64;
+
+    /*
+    // todo: kernel info
     let bios_info = BiosInfo {
-        stage4: PhysicalMemoryRegion::new(STAGE4_DST as u64, stage4_len as u64),
-        kernel: PhysicalMemoryRegion::new(KERNEL_DST as u64, kernel_len as u64),
+        stage4: PhysicalMemoryRegion::new(
+            STAGE4_DST as u64,
+            stage4_len as u64,
+            PhysicalMemoryRegionType::Reserved,
+        ),
+        kernel: PhysicalMemoryRegion::new(
+            KERNEL_DST as u64,
+            kernel_len as u64,
+            PhysicalMemoryRegionType::Reserved,
+        ),
         framebuffer: mode_info.to_framebuffer_info(),
         last_physical_address: KERNEL_DST as u64 + kernel_len as u64,
         memory_map_address: memory_map.map[0..memory_map.size].as_ptr() as u64,
         memory_map_size: memory_map.size as u64,
     };
+    */
 
     enter_protected_mode_and_jump_to_stage3(STAGE3_DST, &bios_info);
 

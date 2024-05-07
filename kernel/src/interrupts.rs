@@ -8,7 +8,8 @@ use lazy_static::lazy_static;
 use x86_64::{idt::InterruptDescriptorTable, instructions::int3};
 
 // todo: https://os.phil-opp.com/catching-exceptions/
-// numbers: https://wiki.osdev.org/Exceptions
+// cur: https://os.phil-opp.com/double-fault-exceptions/
+// exception numbers: https://wiki.osdev.org/Exceptions
 
 // rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11
 
@@ -90,10 +91,15 @@ lazy_static! {
             .set_handler_function(handler_without_error_code!(breakpoint_handler));
         idt.invalid_opcode
             .set_handler_function(handler_without_error_code!(invalid_opcode_handler));
+
+        /*
         idt.page_fault
             .set_handler_function(handler_with_error_code!(page_fault_handler));
+        */
         idt.alignment_check
             .set_handler_function(handler_with_error_code!(alignment_check_handler));
+        idt.double_fault
+            .set_handler_function(handler_with_error_code!(double_fault_handler));
 
         idt
     };
@@ -172,4 +178,14 @@ extern "C" fn alignment_check_handler(frame: &ExceptionStackFrame, error_code: u
 
 extern "C" fn breakpoint_handler(frame: &ExceptionStackFrame) {
     println!("Int3 triggered: {:?}", frame);
+}
+
+// double fault acts kind of like a catch-all block
+// “double fault exception can occur when a second exception occurs during the
+// handling of a prior (first) exception handler”. The “can” is important:
+// Only very specific combinations of exceptions lead to a double fault
+// https://os.phil-opp.com/double-fault-exceptions/
+extern "C" fn double_fault_handler(frame: &ExceptionStackFrame, error_code: u64) -> ! {
+    println!("Double fault handler");
+    loop {}
 }

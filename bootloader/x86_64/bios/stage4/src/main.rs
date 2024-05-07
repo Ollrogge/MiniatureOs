@@ -13,7 +13,7 @@ use x86_64::{
     gdt::{self, SegmentDescriptor},
     memory::{
         Address, MemoryRegion, Page, PageSize, PhysicalAddress, PhysicalFrame,
-        PhysicalMemoryRegion, VirtualAddress, KIB,
+        PhysicalMemoryRegion, PhysicalMemoryRegionType, VirtualAddress, KIB,
     },
     paging::{FourLevelPageTable, Mapper, PageTable, PageTableEntryFlags},
     println,
@@ -149,19 +149,81 @@ where
         .expect("Identity mapping gdt failed");
 }
 
+/// Returns the current state of the memory (which regions are used and which are not)
+// Updates the
+fn build_memory_map<A, S>(
+    allocator: &A,
+    regions: &[E820MemoryRegion],
+    last_frame: &PhysicalFrame<S>,
+) -> [Option<PhysicalMemoryRegion>; 0x20]
+where
+    A: FrameAllocator<S>,
+    S: PageSize,
+{
+    let mut new_regions = [None; 0x20];
+    let mut idx: usize = 0;
+    for (i, region) in regions.iter().enumerate() {
+        if !region.is_usable() {
+            new_regions[idx] = Some(region.into());
+            idx += 1;
+        } else {
+            // split the region into an unusable one and a usable one if the last
+            // frame is in this region
+            if region.contains(last_frame.address.as_u64()) {
+                let sz = last_frame.end() - region.start();
+                let used_region = PhysicalMemoryRegion::new(
+                    region.start(),
+                    sz,
+                    PhysicalMemoryRegionType::Reserved,
+                );
+
+                new_regions[idx] = Some(used_region);
+                idx += 1;
+
+                if last_frame.end() != region.end() {
+                    let sz = region.end() - last_frame.end();
+                    let free_region = PhysicalMemoryRegion::new(
+                        last_frame.end(),
+                        sz,
+                        PhysicalMemoryRegionType::Free,
+                    );
+
+                    new_regions[idx] = Some(used_region);
+                    idx += 1;
+                }
+            } else {
+                new_regions[idx] = Some(region.into());
+                idx += 1;
+            }
+        }
+
+        // Need a better solution if this happens or increase the array size
+        assert!(idx < new_regions.len())
+    }
+
+    new_regions
+}
+
 fn allocate_and_map_boot_info<A, M, S>(
     frame_allocator: &mut A,
     page_table: &mut M,
     info: &BiosInfo,
-    memory_map: &[E820MemoryRegion],
+    e820_memory_map: &[E820MemoryRegion],
 ) -> VirtualAddress
 where
     A: FrameAllocator<S>,
     M: Mapper<S>,
     S: PageSize,
 {
+    let frame = frame_allocator
+        .allocate_frame()
+        .expect("Failed to allocate frame for boot info");
+
     let mut boot_info_layout = Layout::new::<BootInfo>();
-    let usable_memory_regions_amount = memory_map.iter().filter(|r| r.is_usable()).count();
+    let memory_map = build_memory_map(frame_allocator, e820_memory_map, &frame);
+    let usable_memory_regions_amount = memory_map.iter().filter(|r| r.is_some()).count();
+
+    // write MemoryRegions array onto the same frame behind the bootinfo struct
     let memory_regions_layout =
         Layout::array::<PhysicalMemoryRegion>(usable_memory_regions_amount).unwrap();
     let (combined_layout, memory_regions_offset) =
@@ -174,18 +236,13 @@ where
         "Required memory for boot info is bigger than page size"
     );
 
-    let frame = frame_allocator
-        .allocate_frame()
-        .expect("Failed to allocate frame for boot info");
-
     // write memory regions information to allocated frame
     let memory_regions_ptr: *mut PhysicalMemoryRegion =
         (frame.address + memory_regions_offset).as_mut_ptr();
 
-    for (idx, mem_region) in memory_map.iter().filter(|r| r.is_usable()).enumerate() {
-        let mem_region: PhysicalMemoryRegion = mem_region.into();
+    for (idx, mem_region) in memory_map.iter().filter_map(|r| r.as_ref()).enumerate() {
         let ptr = unsafe { memory_regions_ptr.add(idx) };
-        unsafe { ptr::write(ptr, mem_region) }
+        unsafe { ptr::write(ptr, *mem_region) };
     }
 
     // write bootinfo to allocated frame
@@ -232,7 +289,7 @@ fn start(info: &BiosInfo) -> ! {
         )
     };
 
-    // +1 to get the next frame after the last frame we allocate data in
+    // +1 to get the next frame after the last frame we allocated data in
     let next_free_frame =
         PhysicalFrame::containing_address(PhysicalAddress::new(info.last_physical_address)) + 1;
 
@@ -241,7 +298,7 @@ fn start(info: &BiosInfo) -> ! {
 
     let frame = allocator
         .allocate_frame()
-        .expect("Failed to allocate frame");
+        .expect("Failed to allocate frame for kernel page table");
 
     // 1:1 mapping, therefore frame address = virtual address
     let kernel_page_table_address = VirtualAddress::new(frame.address.as_u64());
@@ -255,10 +312,12 @@ fn start(info: &BiosInfo) -> ! {
 
     identity_map_context_switch_function(&mut allocator, &mut page_table);
 
+    initialize_and_map_gdt(&mut allocator, &mut page_table);
+
+    // No more allocations should be done after the boot info has been allocated.
+    // Otherwise memory regions information is incorrect
     let boot_info_address =
         allocate_and_map_boot_info(&mut allocator, &mut page_table, &info, memory_map);
-
-    initialize_and_map_gdt(&mut allocator, &mut page_table);
 
     // todo: detect RSDP (Root System Description Pointer)
     println!(

@@ -2,7 +2,7 @@
 #![no_main]
 use api::FramebufferInfo;
 use core::{arch::asm, mem::size_of};
-use x86_64::memory::{MemoryRegion, PhysicalMemoryRegion};
+use x86_64::memory::{MemoryRegion, PhysicalMemoryRegion, PhysicalMemoryRegionType};
 
 pub mod mbr;
 pub mod realmode;
@@ -25,7 +25,7 @@ pub extern "C" fn fail(code: u8) -> ! {
     panic!("Fail called with code: {:x}", code);
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 #[repr(C)]
 pub struct BiosInfo {
     pub stage4: PhysicalMemoryRegion,
@@ -72,6 +72,15 @@ pub enum E820MemoryRegionType {
     Unusable,
 }
 
+impl Into<PhysicalMemoryRegionType> for E820MemoryRegionType {
+    fn into(self) -> PhysicalMemoryRegionType {
+        match self {
+            E820MemoryRegionType::Normal => PhysicalMemoryRegionType::Free,
+            _ => PhysicalMemoryRegionType::Reserved,
+        }
+    }
+}
+
 /// Memory information returned by BIOS 0xe820 command
 #[derive(Default, Clone, Copy, Debug)]
 #[repr(C)]
@@ -96,13 +105,13 @@ impl E820MemoryRegion {
 
 impl Into<PhysicalMemoryRegion> for E820MemoryRegion {
     fn into(self) -> PhysicalMemoryRegion {
-        PhysicalMemoryRegion::new(self.start, self.size)
+        PhysicalMemoryRegion::new(self.start, self.size, self.typ.into())
     }
 }
 
 impl Into<PhysicalMemoryRegion> for &E820MemoryRegion {
     fn into(self) -> PhysicalMemoryRegion {
-        PhysicalMemoryRegion::new(self.start, self.size)
+        PhysicalMemoryRegion::new(self.start, self.size, self.typ.into())
     }
 }
 

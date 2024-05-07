@@ -1,4 +1,6 @@
 // todo: this is not x86_64 specific code. should be moved to somewhere else
+
+// implementation based on: https://whenderson.dev/blog/rust-mutexes/
 use core::{
     cell::UnsafeCell,
     ops::{Deref, DerefMut},

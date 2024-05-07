@@ -1,4 +1,10 @@
-use crate::memory::{Address, MemoryRegion, PageSize, PhysicalAddress, PhysicalFrame, Size4KiB};
+use crate::{
+    memory::{
+        Address, MemoryRegion, PageSize, PhysicalAddress, PhysicalFrame, PhysicalMemoryRegion,
+        Size4KiB,
+    },
+    println,
+};
 use core::{clone::Clone, iter::Iterator, panic};
 /// A trait for types that can allocate a frame of memory.
 ///
@@ -12,6 +18,10 @@ pub unsafe trait FrameAllocator<S: PageSize> {
     fn allocate_frame(&mut self) -> Option<PhysicalFrame<S>>;
 }
 
+/// Very simple bump allocator. Allocates memory linearly and only keeps track
+/// of the number of allocated bytes and the number of allocations.
+/// Can only free all memory at once.
+// https://os.phil-opp.com/allocator-designs/#bump-allocator
 pub struct BumpFrameAllocator<I: Iterator, D: MemoryRegion> {
     memory_map: I,
     current_region: Option<D>,
@@ -23,6 +33,7 @@ where
     I: Iterator<Item = D>,
     D: MemoryRegion,
 {
+    // The frame passed to this function MUST be valid
     pub fn new_starting_at(frame: PhysicalFrame, mut memory_map: I) -> Self {
         // todo: this assmumes memory map is sorted
         let mut current_region = None;
@@ -57,15 +68,25 @@ where
         let mut next_frame = current_frame + 1;
 
         if !current_region.contains(next_frame.address.as_u64()) {
-            while let Some(region) = self.memory_map.next() {
-                if !region.is_usable() {
-                    continue;
+            loop {
+                match self.memory_map.next() {
+                    Some(region) if region.is_usable() => {
+                        next_frame =
+                            PhysicalFrame::containing_address(PhysicalAddress::new(region.start()));
+                        self.current_region = Some(region);
+                        println!("HELLO A");
+                        break;
+                    }
+                    Some(_) => {
+                        println!("HELLO B");
+                        continue;
+                    }
+                    None => {
+                        println!("HELLO C");
+                        self.current_region = None;
+                        break;
+                    }
                 }
-
-                next_frame =
-                    PhysicalFrame::containing_address(PhysicalAddress::new(region.start()));
-                self.current_region = Some(region);
-                break;
             }
         }
 
