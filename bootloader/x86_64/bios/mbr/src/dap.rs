@@ -1,13 +1,21 @@
 use crate::util::UnwrapOrFail;
 use core::arch::asm;
 
+/// BIOS disk address packet
 #[repr(C, packed)]
 pub struct DiskAddressPacket {
+    /// size of packet (16)
     size: u8,
     zero: u8,
+    /// number of sectors to transfer
     sector_count: u16,
+    /// 16 bit offset of transfer buffer address
     offset: u16,
+    /// 16 bit segment of buffer address
     segment: u16,
+    /// starting logical block address (lba)
+    /// block = basically unique idenfitier for a sector
+    /// LBA tells "where" on the disk (i.e., the sector's position).
     start_lba: u64,
 }
 

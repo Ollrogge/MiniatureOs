@@ -52,7 +52,7 @@ lazy_static! {
 
 #[panic_handler]
 pub fn panic(info: &PanicInfo) -> ! {
-    println!("{}", info);
+    println!("PANIC: {}", info);
     loop {
         hlt();
     }
@@ -108,7 +108,7 @@ fn start(disk_number: u16, partition_table_start: *const u8) -> ! {
         0,
     );
 
-    let mut fs = fat::FileSystem::parse(disk);
+    let mut fs = fat::FATFileSystem::parse(disk);
 
     let stage3_len = fs
         .try_load_file("stage3", STAGE3_DST)

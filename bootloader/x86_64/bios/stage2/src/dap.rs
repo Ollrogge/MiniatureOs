@@ -1,16 +1,24 @@
 //! This module implements disk access using BIOS function 0x42
 //! https://wiki.osdev.org/BIOS
 //! https://wiki.osdev.org/Disk_access_using_the_BIOS_(INT_13h)
+use crate::println;
 use core::arch::asm;
 
-/// Structure containing information about the disk access for the BIOS
+/// BIOS disk address packet
 #[repr(C, packed)]
 pub struct DiskAddressPacket {
+    /// size of packet (16)
     size: u8,
     zero: u8,
+    /// number of sectors to transfer
     sector_count: u16,
+    /// 16 bit offset of transfer buffer address
     offset: u16,
+    /// 16 bit segment of buffer address
     segment: u16,
+    /// starting logical block address (lba)
+    /// block = basically unique idenfitier for a sector
+    /// LBA tells "where" on the disk (i.e., the sector's position).
     start_lba: u64,
 }
 

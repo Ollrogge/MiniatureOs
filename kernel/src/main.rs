@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 #![feature(naked_functions)]
+extern crate alloc;
 use api::{BootInfo, PhysicalMemoryRegions};
 use core::{arch::asm, panic::PanicInfo};
 use x86_64::{
@@ -10,6 +11,7 @@ use x86_64::{
     register::Cr0,
 };
 mod interrupts;
+mod memory;
 
 #[panic_handler]
 pub fn panic(info: &PanicInfo) -> ! {
