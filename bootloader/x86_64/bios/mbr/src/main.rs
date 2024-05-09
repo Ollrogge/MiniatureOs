@@ -9,6 +9,8 @@
 //!     - NOT 16 bit. 32 bit registers are accessible (Operand Size Override Prefix)
 //!     - real = all addresses correspond to real locations in memory
 //!     - access to BIOS functions
+//!     - Segment registers = contents interpreted as the most significant 16
+//!     bits of a linear 20-bit address
 //!     - no support for memory protection, code privilege levels, paging, multitasking
 //!     - segment registers hold direct segment addresses.
 //!     - Segmentation: Addressing works based on segment selectors + an offset.

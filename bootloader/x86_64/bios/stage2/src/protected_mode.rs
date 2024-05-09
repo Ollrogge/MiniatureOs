@@ -19,6 +19,14 @@ use x86_64::{
 /// => One can use this behavior to address more memory in real mode by entering
 /// protected mode, changing the limit and then changing back to real mode.
 ///
+/// a segment register is loaded with a "selector", a "segment descriptor
+/// cache register" is filled with the descriptor's values, including the
+/// size (or limit). After the switch back to real mode, these values are
+/// not modified, regardless of what value is in the 16-bit segment register.
+/// So the 64KiB limit is no longer valid and 32-bit offsets can be used in
+/// Real Mode to actually access areas above 64KiB (segment * 16 + 32-bit offset).
+
+///
 pub fn enter_unreal_mode() {
     let ds: u16;
     let ss: u16;
