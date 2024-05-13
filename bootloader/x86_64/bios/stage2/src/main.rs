@@ -28,7 +28,6 @@ mod memory_map;
 mod print;
 mod protected_mode;
 mod vesa;
-use crate::memory_map::MEMORY_MAP;
 use memory_map::MemoryMap;
 use protected_mode::*;
 
@@ -150,9 +149,7 @@ fn start(disk_number: u16, partition_table_start: *const u8) -> ! {
     // TODO: forgot why
     vesa_info.set_mode(mode).expect("Failed to set vesa mode");
 
-    // todo: kernel info
     let mut bios_info = BIOS_INFO.lock();
-
     bios_info.stage4 = PhysicalMemoryRegion::new(
         STAGE4_DST as u64,
         stage4_len as u64,
@@ -167,26 +164,6 @@ fn start(disk_number: u16, partition_table_start: *const u8) -> ! {
     bios_info.last_physical_address = KERNEL_DST as u64 + kernel_len as u64;
     bios_info.memory_map_address = memory_map.map.as_ptr() as u64;
     bios_info.memory_map_size = memory_map.size as u64;
-
-    /*
-    // todo: kernel info
-    let bios_info = BiosInfo {
-        stage4: PhysicalMemoryRegion::new(
-            STAGE4_DST as u64,
-            stage4_len as u64,
-            PhysicalMemoryRegionType::Reserved,
-        ),
-        kernel: PhysicalMemoryRegion::new(
-            KERNEL_DST as u64,
-            kernel_len as u64,
-            PhysicalMemoryRegionType::Reserved,
-        ),
-        framebuffer: mode_info.to_framebuffer_info(),
-        last_physical_address: KERNEL_DST as u64 + kernel_len as u64,
-        memory_map_address: memory_map.map[0..memory_map.size].as_ptr() as u64,
-        memory_map_size: memory_map.size as u64,
-    };
-    */
 
     enter_protected_mode_and_jump_to_stage3(STAGE3_DST, &bios_info);
 

@@ -20,7 +20,7 @@ static PML4T: Mutex<PageTable> = Mutex::new(PageTable::empty());
 static PDPT: Mutex<PageTable> = Mutex::new(PageTable::empty());
 static PDT: Mutex<[PageTable; 10]> = Mutex::new([PageTable::empty(); 10]);
 
-pub fn init() {
+pub fn init_and_switch_to_long_mode() {
     create_mappings();
     enable_paging();
 }

@@ -72,8 +72,7 @@ pub struct BiosParameterBlock {
 impl BiosParameterBlock {
     pub fn parse<D: Read + Seek>(disk: &mut D) -> Self {
         disk.seek(SeekFrom::Start(0));
-
-        let raw = unsafe { disk.read_bytes(512) };
+        let raw = unsafe { disk.read_bytes(DEFAULT_SECTOR_SIZE) };
 
         let bytes_per_sector = u16::from_le_bytes(raw[11..13].try_into().unwrap());
         let sectors_per_cluster = raw[13];
@@ -437,16 +436,17 @@ impl<D: Read + Seek + Clone + Disk> FATFileSystem<D> {
             unimplemented!();
         }
 
-        self.disk
-            .seek(SeekFrom::Start(u64::from(self.bpb.first_root_dir_sector())));
+        self.disk.seek(SeekFrom::StartInSectors(u64::from(
+            self.bpb.first_root_dir_sector(),
+        )));
 
-        self.disk.read_sectors(buffer);
+        self.disk.read(buffer);
 
         RootDirIter::new(buffer)
     }
 
     pub fn find_file_in_root_dir(&mut self, name: &str) -> Option<File> {
-        // todo: somehow not hardcode this ?
+        // TODO: somehow not hardcode this ?
         // FAT16: common to have a root directory with max 512 entries of size 32
         // If I had dynamic memory I could use bpb.root_entry_count
         let mut buffer = [0u8; DEFAULT_SECTOR_SIZE * ROOT_DIR_ENTRY_SIZE];
@@ -479,39 +479,37 @@ impl<D: Read + Seek + Clone + Disk> FATFileSystem<D> {
             .find_file_in_root_dir(name)
             .ok_or(FatError::FileNotFound)?;
 
-        let mut buffer = [0u8; DEFAULT_SECTOR_SIZE];
-
+        let mut buffer = [0u8; DEFAULT_SECTOR_SIZE * 0x8];
         let mut disk: D = self.disk.clone();
-
-        let mut sectors_read = 0x0;
+        let mut total_sectors_read = 0x0;
+        // clusters are contiguous so always read cluster wise
         for cluster in self.file_clusters(&file) {
             let cluster = cluster?;
-            disk.seek(SeekFrom::Start(u64::from(cluster.start_sector)));
+            disk.seek(SeekFrom::StartInSectors(u64::from(cluster.start_sector)));
 
-            for _ in 0..disk.sectors_per_cluster() {
-                disk.read_sectors(&mut buffer);
-                let dest = dest.wrapping_add(sectors_read * DEFAULT_SECTOR_SIZE);
+            let mut sectors_left = disk.sectors_per_cluster();
+            while sectors_left > 0 {
+                let sectors_to_read = usize::min(sectors_left, buffer.len() / disk.sector_size());
+                disk.read_sectors(sectors_to_read, &mut buffer);
 
+                let dest = dest.wrapping_add(total_sectors_read * disk.sector_size());
                 // copy read data to dest
                 unsafe {
-                    ptr::copy_nonoverlapping(buffer.as_ptr(), dest, buffer.len());
+                    ptr::copy_nonoverlapping(
+                        buffer.as_ptr(),
+                        dest,
+                        sectors_to_read * disk.sector_size(),
+                    );
                 }
 
-                sectors_read += 1;
+                total_sectors_read += sectors_to_read;
+                sectors_left -= sectors_to_read;
             }
         }
 
         // smaller and not equal because we read cluster wise and therefore
         // might read more sectors than the size of the file
-        if sectors_read < file.size_in_sectors() as usize {
-            let test = self.bpb.bytes_per_cluster();
-
-            println!(
-                "Error sectors read bla bla: {} {} {}",
-                sectors_read,
-                file.size_in_sectors(),
-                test
-            );
+        if total_sectors_read < file.size_in_sectors() as usize {
             Err(FatError::FileReadError)
         } else {
             Ok(file.size as usize)
@@ -601,18 +599,18 @@ impl FileAllocationTable {
         }
     }
 
-    // TODO: documentation
     //  fat_offset = how many bytes into the FAT you must go to find the entry for cluster
     // calculates which sector of the disk contains the FAT entry for the active_cluster
     //  This remainder tells you the exact byte offset within the sector fat_sector where the FAT entry starts.
-
     // Returns a FatEntry which indicates the location of a data cluster on disk
     pub fn get_entry<D: Read + Seek>(&self, disk: &mut D, cluster: u32) -> FatEntry {
         let val = match self.typ {
             FatType::Fat12 => {
                 // we calculate directly with byte offsets instead of cluster numbers
-                let offset = cluster + (cluster / 2);
-                disk.seek(SeekFrom::Start(u64::from(self.start + offset as u64)));
+                let offset_into_fat = cluster + (cluster / 2);
+                disk.seek(SeekFrom::Start(u64::from(
+                    self.start + offset_into_fat as u64,
+                )));
 
                 // special case for 12 bit entries. They might not be sector aligned.
                 // In this case an entry might straddle the sector-size boundary.
@@ -628,17 +626,21 @@ impl FileAllocationTable {
                 }
             }
             FatType::Fat16 => {
-                let offset = cluster * 2;
-                disk.seek(SeekFrom::Start(u64::from(self.start + offset as u64)));
+                let offset_into_fat = cluster * 2;
+                disk.seek(SeekFrom::Start(u64::from(
+                    self.start + offset_into_fat as u64,
+                )));
 
                 let buf = unsafe { disk.read_bytes(2) };
                 let buf: [u8; 2] = buf.try_into().unwrap();
                 u32::from(u16::from_le_bytes(buf))
             }
             FatType::Fat32 => {
-                let offset = cluster * 4;
+                let offset_into_fat = cluster * 4;
 
-                disk.seek(SeekFrom::Start(u64::from(self.start + offset as u64)));
+                disk.seek(SeekFrom::Start(u64::from(
+                    self.start + offset_into_fat as u64,
+                )));
 
                 let buf = unsafe { disk.read_bytes(4) };
                 let buf: [u8; 4] = buf.try_into().unwrap();

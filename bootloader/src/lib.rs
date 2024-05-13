@@ -143,8 +143,6 @@ impl DiskImageBuilder {
 
 #[cfg(feature = "bios")]
 fn create_fat_filesystem(files: Vec<(&str, &Path)>, out_path: &Path) -> Result<()> {
-    use std::os::unix::fs::MetadataExt;
-
     let mut fat_file = fs::OpenOptions::new()
         .read(true)
         .write(true)

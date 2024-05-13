@@ -36,12 +36,23 @@ impl DiskAddressPacket {
         }
     }
 
-    // https://wiki.osdev.org/BIOS
-    // https://wiki.osdev.org/Disk_access_using_the_BIOS_(INT_13h)
+    /// Read data from disk using BIOS function 13
+    /// https://wiki.osdev.org/Disk_access_using_the_BIOS_(INT_13h)
     pub unsafe fn load(&self, disk_number: u16) {
         let self_addr = self as *const Self as u16;
         unsafe {
-            asm!("push 'h'", "mov si, {0:x}", "int 0x13", "jc fail", "pop si", in(reg) self_addr, in("ah") 0x42u8, in("dx") disk_number);
+            asm!(
+                "push 'h'",
+                "mov {1:x}, si",
+                "mov si, {0:x}",
+                "int 0x13",
+                "jc fail",
+                "pop si",
+                "mov si, {1:x}",
+                in(reg) self_addr,
+                out(reg) _,
+                in("ah") 0x42u8,
+                in("dx") disk_number);
         };
     }
 }

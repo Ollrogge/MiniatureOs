@@ -90,8 +90,7 @@ pub extern "C" fn _start(info: &BiosInfo) -> ! {
 
 fn start(info: &BiosInfo) -> ! {
     println!("Stage3");
-    // this also switches to long mode
-    paging::init();
+    paging::init_and_switch_to_long_mode();
 
     // now we are in long mode but in 32-bit compatibility submode, to enter
     // 64-bit long mode load GDT with 64 bit segment descriptors for code and data

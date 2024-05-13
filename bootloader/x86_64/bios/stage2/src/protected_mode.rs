@@ -41,7 +41,6 @@ pub fn enter_unreal_mode() {
     GDT.clear_interrupts_and_load();
 
     // set protected mode bit
-    let cr0 = Cr0::read_raw();
     unsafe {
         Cr0::update(|val| *val |= Cr0Flags::PROTECTED_MODE_ENABLE);
     }
@@ -63,14 +62,17 @@ pub fn enter_unreal_mode() {
 
     // unset protected mode bit again
     unsafe {
-        Cr0::write_raw(cr0);
+        Cr0::update(|val| *val &= !Cr0Flags::PROTECTED_MODE_ENABLE);
     }
 
-    // recover old segment registers, turn on interrupts
+    // recover old segment registers
     unsafe {
         asm!("mov ds, {0:x}", in(reg) ds, options(nostack, preserves_flags));
         asm!("mov ss, {0:x}", in(reg) ss, options(nostack, preserves_flags));
-        asm!("sti");
+    }
+
+    unsafe {
+        interrupts::enable();
     }
 }
 
@@ -100,9 +102,8 @@ pub fn enter_protected_mode_and_jump_to_stage3(entry_point: *const u8, info: &Bi
         // of the segment to which control is being transferred
         // Second argument is the jump target. Label "2" in this case
         // changes the value in CS register
-        asm!("ljmp $0x8, $2f", options(att_syntax));
+        asm!("ljmp $0x8, $2f", "2:", options(att_syntax));
         asm!(
-            "2:",
             ".code32",
 
             // reload segment registers
