@@ -23,19 +23,3 @@ impl<const ORDER: usize> BuddyFrameAllocator<ORDER> {
         Self::new()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::BuddyFrameAllocator;
-    use x86_64::memory::{PhysicalMemoryRegion, PhysicalMemoryRegionType};
-    #[test]
-    fn test_from_memory_map() {
-        let memory_map = [
-            PhysicalMemoryRegion::new(0, 0x1000, PhysicalMemoryRegionType::Free),
-            PhysicalMemoryRegion::new(0x1000, 0x1000, PhysicalMemoryRegionType::Reserved),
-            PhysicalMemoryRegion::new(0x4000, 0x8000, PhysicalMemoryRegionType::Free),
-        ];
-
-        let allocator = BuddyFrameAllocator::<32>::from_memory_map(memory_map.iter());
-    }
-}

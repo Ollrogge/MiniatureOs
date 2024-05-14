@@ -1,17 +1,15 @@
 #![no_std]
 #![no_main]
 #![feature(naked_functions)]
-extern crate alloc;
 use api::{BootInfo, PhysicalMemoryRegions};
 use core::{arch::asm, panic::PanicInfo};
+use kernel::kernel_init;
 use x86_64::{
     instructions::int3,
     memory::{MemoryRegion, PhysicalMemoryRegion},
     println,
     register::Cr0,
 };
-mod interrupts;
-mod memory;
 
 #[panic_handler]
 pub fn panic(info: &PanicInfo) -> ! {
@@ -65,7 +63,8 @@ fn start(info: &'static BootInfo) -> ! {
 
     print_memory_map(&info.memory_regions);
 
-    interrupts::init();
+    kernel_init(info).unwrap();
+
     println!("Interrupts initialized");
 
     // invalid opcode

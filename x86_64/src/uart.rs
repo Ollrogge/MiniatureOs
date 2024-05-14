@@ -41,6 +41,28 @@ impl ReadPortRegister for u8 {
     }
 }
 
+impl ReadPortRegister for u16 {
+    unsafe fn read_from_register(port: u16) -> u16 {
+        let value: u16;
+        unsafe {
+            asm!("in ax, dx", out("ax")value, in("dx")port,
+                 options(nomem, nostack, preserves_flags));
+        }
+        value
+    }
+}
+
+impl ReadPortRegister for u32 {
+    unsafe fn read_from_register(port: u16) -> u32 {
+        let value: u32;
+        unsafe {
+            asm!("in eax, dx", out("eax")value, in("dx")port,
+                 options(nomem, nostack, preserves_flags));
+        }
+        value
+    }
+}
+
 impl WritePortRegister for u8 {
     unsafe fn write_to_register(port: u16, val: u8) {
         unsafe {
@@ -50,7 +72,24 @@ impl WritePortRegister for u8 {
     }
 }
 
-struct PortRegister<T> {
+impl WritePortRegister for u16 {
+    unsafe fn write_to_register(port: u16, value: u16) {
+        unsafe {
+            asm!("out dx, ax", in("dx") port, in("ax") value, options(nomem, nostack, preserves_flags));
+        }
+    }
+}
+
+impl WritePortRegister for u32 {
+    unsafe fn write_to_register(port: u16, val: u32) {
+        unsafe {
+            asm!("out dx, eax", in("dx")port, in("eax")val,
+            options(nomem, nostack, preserves_flags));
+        }
+    }
+}
+
+pub struct PortRegister<T> {
     address: u16,
     phantom: PhantomData<T>,
 }

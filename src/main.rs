@@ -1,3 +1,4 @@
+use std::env;
 fn main() {
     // read env variables that were set in build script
     let bios_path = env!("BIOS_PATH");
@@ -8,7 +9,9 @@ fn main() {
     cmd.arg("-no-reboot");
     cmd.arg("-nographic");
     cmd.arg("-monitor").arg("/dev/null");
-    //cmd.arg("-enable-kvm");
+    if env::consts::OS == "linux" {
+        cmd.arg("-enable-kvm");
+    }
     cmd.arg("-s");
 
     let mut child = cmd.spawn().unwrap();

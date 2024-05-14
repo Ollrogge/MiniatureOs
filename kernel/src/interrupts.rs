@@ -1,11 +1,10 @@
-use crate::println;
 use bitflags::bitflags;
 use core::{
     arch::asm,
     fmt::{self, Debug},
 };
 use lazy_static::lazy_static;
-use x86_64::{idt::InterruptDescriptorTable, instructions::int3};
+use x86_64::{idt::InterruptDescriptorTable, instructions::int3, println};
 
 // todo: https://os.phil-opp.com/catching-exceptions/
 // cur: https://os.phil-opp.com/double-fault-exceptions/
