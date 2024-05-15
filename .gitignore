@@ -1,5 +1,7 @@
-/target
+target/
 disk_image.img
 .gdb_history
 tags
 *.img
+.cargo/
+.vscode/
