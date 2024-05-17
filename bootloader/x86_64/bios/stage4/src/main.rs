@@ -23,7 +23,7 @@ use x86_64::{
 // hardcoded for now
 const KERNEL_VIRTUAL_BASE: u64 = 0xffffffff80000000;
 const KERNEL_STACK_TOP: u64 = 0xffffffff00000000;
-const KERNEL_STACK_SIZE: usize = 0x40 * KIB;
+const KERNEL_STACK_SIZE: usize = 128 * KIB;
 
 #[panic_handler]
 pub fn panic(info: &PanicInfo) -> ! {
@@ -150,7 +150,7 @@ where
 }
 
 /// Returns the current state of the memory (which regions are used and which are not)
-// Updates the
+//  Splits a memory region into two of only part of it is used
 fn build_memory_map<A, S>(
     allocator: &A,
     regions: &[E820MemoryRegion],
@@ -167,8 +167,8 @@ where
             new_regions[idx] = Some(region.into());
             idx += 1;
         } else {
-            // split the region into an unusable one and a usable one if the last
-            // frame is in this region
+            // split region into usable and unusable pair fi the region is not
+            // completely allocated
             if region.contains(last_frame.address.as_u64()) {
                 let sz = last_frame.end() - region.start();
                 let used_region = PhysicalMemoryRegion::new(
@@ -188,7 +188,7 @@ where
                         PhysicalMemoryRegionType::Free,
                     );
 
-                    new_regions[idx] = Some(used_region);
+                    new_regions[idx] = Some(free_region);
                     idx += 1;
                 }
             } else {

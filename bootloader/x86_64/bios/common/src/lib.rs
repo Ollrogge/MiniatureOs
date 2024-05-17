@@ -120,12 +120,20 @@ impl MemoryRegion for E820MemoryRegion {
         self.start
     }
 
+    fn set_start(&mut self, start: u64) {
+        self.start = start
+    }
+
     fn end(&self) -> u64 {
         self.start + self.size
     }
 
-    fn length(&self) -> u64 {
+    fn size(&self) -> u64 {
         self.size
+    }
+
+    fn set_size(&mut self, size: u64) {
+        self.size = size
     }
 
     fn contains(&self, address: u64) -> bool {

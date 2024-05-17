@@ -12,8 +12,10 @@ pub const GIB: usize = MIB * 1024;
 
 pub trait MemoryRegion: Copy + core::fmt::Debug {
     fn start(&self) -> u64;
+    fn set_start(&mut self, start: u64);
     fn end(&self) -> u64;
-    fn length(&self) -> u64;
+    fn size(&self) -> u64;
+    fn set_size(&mut self, size: u64);
     fn contains(&self, start: u64) -> bool;
     fn is_usable(&self) -> bool;
 }
@@ -34,11 +36,14 @@ impl Region {
 #[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
 pub enum PhysicalMemoryRegionType {
-    /// Either reserved by firmware or used by kernel
+    /// Either reserved by firmware
     #[default]
     Reserved,
     /// Memory that can be freely used by OS
     Free,
+
+    /// Used by Bootloader / Kernel
+    Used,
 }
 
 // ensure 8 byte alignment so it works between the different cpu modes where we have
@@ -67,7 +72,7 @@ impl MemoryRegion for PhysicalMemoryRegion {
         self.start + self.size
     }
 
-    fn length(&self) -> u64 {
+    fn size(&self) -> u64 {
         self.size
     }
 
@@ -77,6 +82,14 @@ impl MemoryRegion for PhysicalMemoryRegion {
 
     fn is_usable(&self) -> bool {
         self.typ == PhysicalMemoryRegionType::Free
+    }
+
+    fn set_start(&mut self, start: u64) {
+        self.start = start
+    }
+
+    fn set_size(&mut self, size: u64) {
+        self.size = size
     }
 }
 

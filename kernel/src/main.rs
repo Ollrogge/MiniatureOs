@@ -3,7 +3,7 @@
 #![feature(naked_functions)]
 use api::{BootInfo, PhysicalMemoryRegions};
 use core::{arch::asm, panic::PanicInfo};
-use kernel::kernel_init;
+use kernel::{kernel_init, memory::buddy_frame_allocator::BuddyFrameAllocator};
 use x86_64::{
     instructions::int3,
     memory::{MemoryRegion, PhysicalMemoryRegion},
@@ -13,6 +13,7 @@ use x86_64::{
 
 #[panic_handler]
 pub fn panic(info: &PanicInfo) -> ! {
+    println!("Kernel PANIC: {}", info);
     loop {}
 }
 
@@ -25,8 +26,10 @@ pub extern "C" fn _start(info: &'static BootInfo) -> ! {
 fn print_memory_map(map: &PhysicalMemoryRegions) {
     for region in map.iter() {
         println!(
-            "Memory region, start: {:#x}, length: {:#x} ",
-            region.start, region.size
+            "Memory region, start: {:#x}, length: {:#x}, usable: {}",
+            region.start,
+            region.size,
+            region.is_usable()
         );
     }
 }
@@ -58,6 +61,53 @@ fn trigger_page_fault() {
     unsafe { *(0xdeabeef as *mut u8) = 42 };
 }
 
+// TODO: put this into the test_kernel
+// TODO: write propert tests
+fn test_buddy_allocator(allocator: &mut BuddyFrameAllocator) {
+    // alloc some chunks to make sure we have buddies
+    // (as there might be single 0x100 chunks at the beginning)
+    for _ in 0..10 {
+        let _ = allocator.alloc(0x100).unwrap();
+    }
+    // Test easy merge
+    let c1 = allocator.alloc(0x100).unwrap();
+    let c2 = allocator.alloc(0x100).unwrap();
+
+    let addr = u64::min(c1.start(), c2.start());
+
+    allocator.dealloc(c1);
+    allocator.dealloc(c2);
+
+    let c3 = allocator.alloc(0x200).unwrap();
+    println!(
+        "Test: c3: {:#x} addr:{:#x}, buddies ?: c1:{:#x} c2:{:#x}",
+        c3.start(),
+        addr,
+        c1.start(),
+        c2.start()
+    );
+
+    assert!(c3.start() == addr);
+
+    // Test multistage merge
+    let c1 = allocator.alloc(0x80).unwrap();
+    let c2 = allocator.alloc(0x80).unwrap();
+    let c3 = allocator.alloc(0x100).unwrap();
+    let addr = u64::min(c3.start(), u64::min(c1.start(), c2.start()));
+
+    // merge 2* 0x80 into 0x100
+    allocator.dealloc(c1);
+    allocator.dealloc(c2);
+    // merge c3 with the 0x100 chunk creates by deallocing c1 and c2
+    allocator.dealloc(c3);
+
+    let c4 = allocator.alloc(0x200).unwrap();
+
+    println!("Test: {:#x} {:#x}", c4.start(), addr);
+
+    assert!(c4.start() == addr);
+}
+
 fn start(info: &'static BootInfo) -> ! {
     println!("Hello from kernel <3");
 
@@ -66,6 +116,12 @@ fn start(info: &'static BootInfo) -> ! {
     kernel_init(info).unwrap();
 
     println!("Interrupts initialized");
+
+    let mut allocator = BuddyFrameAllocator::new();
+    allocator.init(info.memory_regions.into_iter().cloned());
+    println!("Buddy allocator initialized");
+
+    test_buddy_allocator(&mut allocator);
 
     // invalid opcode
     /*

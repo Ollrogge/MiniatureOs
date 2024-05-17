@@ -19,3 +19,5 @@
 
 **Println**
 + use a different println in kernel and tests than the one exported by x86_64 crate. Defining it there is just a dirty hack to get println debugging working for this code
+
++ use reserved physicalmemory region type only for regions used by BIOS. Else use sth like allocated
