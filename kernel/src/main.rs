@@ -62,12 +62,22 @@ fn trigger_page_fault() {
 }
 
 // TODO: put this into the test_kernel
-// TODO: write propert tests
+// TODO: write proper tests
 fn test_buddy_allocator(allocator: &mut BuddyFrameAllocator) {
     // alloc some chunks to make sure we have buddies
     // (as there might be single 0x100 chunks at the beginning)
-    for _ in 0..10 {
-        let _ = allocator.alloc(0x100).unwrap();
+    let mut last_start = allocator.alloc(0x100).unwrap().start();
+    loop {
+        let c = allocator.alloc(0x100).unwrap();
+
+        // the higher buddy is returned first
+        if c.start() + 0x100 == last_start {
+            break;
+        }
+
+        println!("Test: {:#x} {:#x}", c.start(), last_start);
+
+        last_start = c.start();
     }
     // Test easy merge
     let c1 = allocator.alloc(0x100).unwrap();
@@ -89,16 +99,24 @@ fn test_buddy_allocator(allocator: &mut BuddyFrameAllocator) {
 
     assert!(c3.start() == addr);
 
+    let addr = c3.start();
+    allocator.dealloc(c3);
+
     // Test multistage merge
-    let c1 = allocator.alloc(0x80).unwrap();
-    let c2 = allocator.alloc(0x80).unwrap();
-    let c3 = allocator.alloc(0x100).unwrap();
+
+    // c1 and c2 should be created from the c3 we just deallocated
+    let c1 = allocator.alloc(0x100).unwrap();
+    let c2 = allocator.alloc(0x100).unwrap();
+
+    assert!(u64::min(c1.start(), c2.start()) == addr);
+
+    let c3 = allocator.alloc(0x200).unwrap();
     let addr = u64::min(c3.start(), u64::min(c1.start(), c2.start()));
 
-    // merge 2* 0x80 into 0x100
+    // merge 2* 0x100 into 0x200
     allocator.dealloc(c1);
     allocator.dealloc(c2);
-    // merge c3 with the 0x100 chunk creates by deallocing c1 and c2
+    // merge c3 with the 0x200 chunk created by deallocing c1 and c2
     allocator.dealloc(c3);
 
     let c4 = allocator.alloc(0x200).unwrap();

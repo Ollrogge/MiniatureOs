@@ -1,6 +1,5 @@
-use crate::{
-    frame_allocator::FrameAllocator,
-    memory::{Address, Page, PageSize, PhysicalAddress, PhysicalFrame, Size4KiB, VirtualAddress},
+use crate::memory::{
+    Address, Page, PageSize, PhysicalAddress, PhysicalFrame, Size2MiB, Size4KiB, VirtualAddress,
 };
 use bit_field::BitField;
 use bitflags::bitflags;
@@ -10,6 +9,21 @@ use core::{
     result::Result,
     slice,
 };
+
+pub mod mapped_page_table;
+pub mod offset_page_table;
+
+/// A trait for types that can allocate a frame of memory.
+///
+/// # Safety
+///
+/// The implementer of this trait must guarantee that the `allocate_frame`
+/// method returns only unique unused frames. Otherwise, undefined behavior
+/// may result from two callers modifying or deallocating the same frame.
+pub unsafe trait FrameAllocator<S: PageSize> {
+    /// Allocate a frame of the appropriate size and return it if possible.
+    fn allocate_frame(&mut self) -> Option<PhysicalFrame<S>>;
+}
 
 bitflags! {
     /// Possible flags for a page table entry.
@@ -68,16 +82,18 @@ impl PageTableEntry {
         self.0 == 0
     }
 
-    pub fn physical_address(&self) -> PhysicalAddress {
+    pub fn address(&self) -> PhysicalAddress {
         PhysicalAddress::new(self.0.get_bits(12..48) << 12)
     }
 
     pub fn physical_frame(&self) -> PhysicalFrame {
-        PhysicalFrame::containing_address(self.physical_address())
+        PhysicalFrame::containing_address(self.address())
     }
 
-    pub fn set_frame(&mut self, frame: PhysicalFrame, flags: PageTableEntryFlags) {
-        self.0 = frame.address.as_u64() | flags.bits();
+    /// Sets the physical address of either the next page table this entry points
+    /// to or the physical address of the physical frame if last level
+    pub fn set_address(&mut self, addr: PhysicalAddress, flags: PageTableEntryFlags) {
+        self.0 = addr.as_u64() | flags.bits();
     }
 
     pub fn flags(&self) -> PageTableEntryFlags {
@@ -145,69 +161,6 @@ impl IndexMut<usize> for PageTable {
     }
 }
 
-/// Assumes that all page table related data is 1:1 mapped.
-pub struct FourLevelPageTable<'a> {
-    pml4t: &'a mut PageTable,
-    walker: PageTableWalker,
-}
-
-impl<'a> FourLevelPageTable<'a> {
-    pub fn new(pml4t: &'a mut PageTable) -> Self {
-        Self {
-            pml4t,
-            walker: PageTableWalker {},
-        }
-    }
-}
-
-/// This struct only exists to avoid borrowing self twice in the map_to func
-struct PageTableWalker;
-
-impl PageTableWalker {
-    /// Allocates pagetable or returns it if already existing
-    // assumes 1:1 mapping for physical frames holding pagetable data
-    // using virtual addresses here because we are in long mode and all memory accesses
-    // are based on virtual memory. So just to make it explicit
-    pub fn get_or_allocate_pagetable<'a, A>(
-        &self,
-        pagetable_entry: &'a mut PageTableEntry,
-        flags: PageTableEntryFlags,
-        allocator: &mut A,
-    ) -> Option<&'a mut PageTable>
-    where
-        A: FrameAllocator<Size4KiB>,
-    {
-        let table = if pagetable_entry.is_unused() {
-            let frame = allocator.allocate_frame()?;
-            pagetable_entry.set_frame(frame, flags);
-
-            let virtual_address = VirtualAddress::new(frame.address.as_u64());
-            let table = PageTable::initialize_empty_at_address(virtual_address);
-            table
-        } else {
-            if !flags.is_empty() && !pagetable_entry.flags().contains(flags) {
-                pagetable_entry.set_flags(pagetable_entry.flags() | flags);
-            }
-            // 1:1
-            let virtual_address =
-                VirtualAddress::new(pagetable_entry.physical_frame().address.as_u64());
-            PageTable::at_address(virtual_address)
-        };
-
-        Some(table)
-    }
-
-    pub fn get_pagetable<'a>(&self, pagetable_entry: &'a PageTableEntry) -> Option<&'a PageTable> {
-        if !pagetable_entry.is_unused() {
-            let virtual_address =
-                VirtualAddress::new(pagetable_entry.physical_frame().address.as_u64());
-            Some(PageTable::at_address(virtual_address))
-        } else {
-            None
-        }
-    }
-}
-
 #[derive(Debug)]
 pub enum MappingError {
     FrameAllocationFailed,
@@ -226,7 +179,7 @@ pub trait Mapper<S: PageSize> {
         frame_allocator: &mut A,
     ) -> Result<(), MappingError>
     where
-        A: FrameAllocator<S>;
+        A: FrameAllocator<Size4KiB>;
 
     fn identity_map<A>(
         &mut self,
@@ -235,96 +188,27 @@ pub trait Mapper<S: PageSize> {
         frame_allocator: &mut A,
     ) -> Result<(), MappingError>
     where
-        A: FrameAllocator<S>,
+        A: FrameAllocator<Size4KiB>,
     {
         let page = Page::containing_address(VirtualAddress::new(frame.address.as_u64()));
         self.map_to(frame, page, flags, frame_allocator)
     }
 }
 
-impl<'a> Mapper<Size4KiB> for FourLevelPageTable<'a> {
-    fn map_to<A>(
-        &mut self,
-        frame: PhysicalFrame<Size4KiB>,
-        page: Page<Size4KiB>,
-        flags: PageTableEntryFlags,
-        frame_allocator: &mut A,
-    ) -> Result<(), MappingError>
-    where
-        A: FrameAllocator<Size4KiB>,
-    {
-        let parent_flags = PageTableEntryFlags::PRESENT
-            | PageTableEntryFlags::WRITABLE
-            | PageTableEntryFlags::USER_ACCESSIBLE;
-        let l4 = &mut self.pml4t;
-        let l3 = self
-            .walker
-            .get_or_allocate_pagetable(
-                &mut l4[page.address.l4_index()],
-                parent_flags,
-                frame_allocator,
-            )
-            .ok_or(MappingError::FrameAllocationFailed)?;
-        let l2 = self
-            .walker
-            .get_or_allocate_pagetable(
-                &mut l3[page.address.l3_index()],
-                parent_flags,
-                frame_allocator,
-            )
-            .ok_or(MappingError::FrameAllocationFailed)?;
-        let l1 = self
-            .walker
-            .get_or_allocate_pagetable(
-                &mut l2[page.address.l2_index()],
-                parent_flags,
-                frame_allocator,
-            )
-            .ok_or(MappingError::FrameAllocationFailed)?;
+pub trait MapperAllSizes: Mapper<Size4KiB> + Mapper<Size2MiB> {}
 
-        let pte = &mut l1[page.address.l1_index()];
-
-        if pte.is_present() {
-            Err(MappingError::PageAlreadyMapped)
-        } else {
-            pte.set_frame(frame, flags);
-            Ok(())
-        }
-    }
-}
+impl<T> MapperAllSizes for T where T: Mapper<Size4KiB> + Mapper<Size2MiB> {}
 
 #[derive(Debug)]
 pub enum TranslationError {
     NotMapped,
 }
 
+pub trait TranslatorAllSizes: Translator<Size4KiB> + Translator<Size2MiB> {}
+
+impl<T> TranslatorAllSizes for T where T: Translator<Size4KiB> + Translator<Size2MiB> {}
+
 /// Translates page to physical frame using page table
 pub trait Translator<S: PageSize> {
-    fn translate(&self, page: Page<S>) -> Result<PhysicalFrame, TranslationError>;
-}
-
-impl<'a> Translator<Size4KiB> for FourLevelPageTable<'a> {
-    fn translate(&self, page: Page<Size4KiB>) -> Result<PhysicalFrame, TranslationError> {
-        let l4 = &self.pml4t;
-        let l3 = self
-            .walker
-            .get_pagetable(&l4[page.address.l4_index()])
-            .ok_or(TranslationError::NotMapped)?;
-        let l2 = self
-            .walker
-            .get_pagetable(&l3[page.address.l3_index()])
-            .ok_or(TranslationError::NotMapped)?;
-        let l1 = self
-            .walker
-            .get_pagetable(&l2[page.address.l2_index()])
-            .ok_or(TranslationError::NotMapped)?;
-
-        let pte = &l1[page.address.l1_index()];
-
-        if pte.is_present() {
-            Ok(pte.physical_frame())
-        } else {
-            Err(TranslationError::NotMapped)
-        }
-    }
+    fn translate(&self, page: Page<S>) -> Result<PhysicalFrame<S>, TranslationError>;
 }

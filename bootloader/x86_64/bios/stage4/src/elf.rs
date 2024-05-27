@@ -1,12 +1,12 @@
-use crate::{start, BumpFrameAllocator, PageTable};
 use common::BiosInfo;
 use core::{cmp, marker::PhantomData, mem, ops::Add, ptr, slice};
 use elfloader::{arch::x86_64::RelocationTypes, *};
 use x86_64::{
-    frame_allocator,
-    frame_allocator::FrameAllocator,
     memory::{Address, Page, PageSize, PhysicalAddress, PhysicalFrame, Size4KiB, VirtualAddress},
-    paging::{FourLevelPageTable, Mapper, PageTableEntryFlags, Translator},
+    paging::{
+        mapped_page_table::MappedPageTable, FrameAllocator, Mapper, MapperAllSizes, PageTable,
+        PageTableEntryFlags, Translator, TranslatorAllSizes,
+    },
     println,
 };
 
@@ -14,19 +14,17 @@ use x86_64::{
 // need it to load elfs for the kernel as well
 // also TODO: remove dependency to elfloader
 
-pub struct KernelLoader<'a, M, A, S> {
+pub struct KernelLoader<'a, M, A> {
     virtual_base: u64,
     info: &'a BiosInfo,
     page_table: &'a mut M,
     frame_allocator: &'a mut A,
-    _marker: PhantomData<S>,
 }
 
-impl<'a, M, A, S> KernelLoader<'a, M, A, S>
+impl<'a, M, A> KernelLoader<'a, M, A>
 where
-    M: Mapper<S> + Translator<S>,
-    A: FrameAllocator<S>,
-    S: PageSize,
+    M: MapperAllSizes + TranslatorAllSizes,
+    A: FrameAllocator<Size4KiB>,
 {
     pub fn new(
         vbase: u64,
@@ -39,7 +37,6 @@ where
             info,
             page_table,
             frame_allocator,
-            _marker: PhantomData,
         }
     }
 
@@ -56,7 +53,8 @@ where
     }
 
     // https://dram.page/p/relative-relocs-explained/
-    // Basically means: Please fill in the value of (virtual_base + addend) at offset from base of executable
+    // Basically means: Please fill in the value of (virtual_base + addend)
+    // at offset from base of executable
     fn handle_relative_relocation(&mut self, entry: RelocationEntry) {
         let value_bytes = (self.virtual_base
             + entry
@@ -70,14 +68,14 @@ where
         let start_page = Page::containing_address(virtual_address);
         let end_page = Page::containing_address(virtual_address + value_bytes.len());
         let mut bytes_written = 0;
-        for page in Page::range_inclusive(start_page, end_page) {
+        for page in Page::<Size4KiB>::range_inclusive(start_page, end_page) {
             // entry.offset if relative to virtual base, so we need to first map
             // the page corresponding to virtual base to its physical frame and then
             // calculate the correct offset
             let frame = self
                 .page_table
                 .translate(page)
-                .expect("Relative relocation: Failed to map page to frame");
+                .expect("Relative relocation: Failed to translate to frame");
 
             // we are on the first page
             let offset = if virtual_address > page.address {
@@ -87,7 +85,7 @@ where
                 0
             };
 
-            // Write spans two pages, calculate amount of bytes for first page
+            // Write spans two pages, so calculate amount of bytes for first page
             let bytes_to_write = if virtual_address + value_bytes.len() > page.end() {
                 (page.end() - virtual_address) as usize
             // Either we write the full 8 bytes, or the rest of the value on the second page
@@ -111,11 +109,10 @@ where
     }
 }
 
-impl<'a, M, A, S> ElfLoader for KernelLoader<'a, M, A, S>
+impl<'a, M, A> ElfLoader for KernelLoader<'a, M, A>
 where
-    M: Mapper<S> + Translator<S>,
-    A: FrameAllocator<S>,
-    S: PageSize,
+    M: MapperAllSizes + TranslatorAllSizes,
+    A: FrameAllocator<Size4KiB>,
 {
     // we just need allocate and not load since we align down the addresses such
     // that accesses will still work.
@@ -130,14 +127,13 @@ where
 
             let physical_start_address =
                 PhysicalAddress::new(self.info.kernel.start + header.offset());
-            let start_frame: PhysicalFrame<S> =
-                PhysicalFrame::containing_address(physical_start_address);
+            let start_frame = PhysicalFrame::containing_address(physical_start_address);
 
-            let end_frame: PhysicalFrame<S> = PhysicalFrame::containing_address(
+            let end_frame: PhysicalFrame = PhysicalFrame::containing_address(
                 physical_start_address + header.file_size() - 1u64,
             );
 
-            let start_page: Page<S> = Page::containing_address(VirtualAddress::new(
+            let start_page = Page::containing_address(VirtualAddress::new(
                 self.virtual_base + header.virtual_addr(),
             ));
 

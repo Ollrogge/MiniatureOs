@@ -6,9 +6,10 @@ use core::{
     ops::{Add, AddAssign, Sub},
 };
 
-pub const KIB: usize = 1024;
-pub const MIB: usize = KIB * 1024;
-pub const GIB: usize = MIB * 1024;
+pub const KIB: u64 = 1024;
+pub const MIB: u64 = KIB * 1024;
+pub const GIB: u64 = MIB * 1024;
+pub const TIB: u64 = GIB * 1024;
 
 pub trait MemoryRegion: Copy + core::fmt::Debug {
     fn start(&self) -> u64;
@@ -102,6 +103,13 @@ pub enum Size4KiB {}
 
 impl PageSize for Size4KiB {
     const SIZE: u64 = 0x1000;
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Debug)]
+pub enum Size2MiB {}
+
+impl PageSize for Size2MiB {
+    const SIZE: u64 = 0x200000;
 }
 
 pub trait Address {
@@ -334,15 +342,11 @@ impl<S: PageSize> PhysicalFrame<S> {
         }
     }
 
-    pub fn start(&self) -> u64 {
-        self.address.as_u64()
-    }
-
     pub fn end(&self) -> u64 {
-        self.start() + self.size() as u64
+        self.start().as_u64() + self.size() as u64
     }
 
-    pub fn address(&self) -> PhysicalAddress {
+    pub fn start(&self) -> PhysicalAddress {
         self.address
     }
 
@@ -370,6 +374,7 @@ impl<S: PageSize> Iterator for PhysicalFrameRangeInclusive<S> {
     fn next(&mut self) -> Option<Self::Item> {
         if self.start <= self.end {
             let frame = self.start;
+            // add 1 frame to start = S::SIZE
             self.start += 1;
             Some(frame)
         } else {
@@ -452,6 +457,10 @@ impl<S: PageSize> Page<S> {
 
     pub fn end(self) -> VirtualAddress {
         self.address + S::SIZE
+    }
+
+    pub fn start(self) -> VirtualAddress {
+        self.address
     }
 }
 

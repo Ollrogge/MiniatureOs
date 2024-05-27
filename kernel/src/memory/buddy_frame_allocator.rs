@@ -1,6 +1,6 @@
 extern crate alloc;
 use alloc::collections::BTreeSet;
-use core::{array, cmp::min, mem::MaybeUninit, ops::DerefMut, ptr::NonNull};
+use core::{array, cmp::min, mem::MaybeUninit, ops::DerefMut, ptr::NonNull, u64::MAX};
 use x86_64::{
     memory::{MemoryRegion, PhysicalMemoryRegion, PhysicalMemoryRegionType},
     println,
@@ -21,6 +21,8 @@ use x86_64::{
 // not as dynamic as the first one. However it feels safer and good enough for now
 //
 // => Use approach 2 for now
+//
+// cons of buddy_frame allocator: only supports power of 2 allocations
 
 // max order is 1 MiB => max buddy size is 512kib
 const MAX_ORDER: usize = 20;
@@ -39,6 +41,8 @@ trait LinkedListTrait {
     fn front_mut(&mut self) -> Option<&mut Node>;
 }
 
+// The value of the Node cant be generic since then the LinkedListWithStorage wont work
+// as it requires an array which size must be known at compile time
 #[derive(Clone, Copy)]
 struct Node {
     next: Option<NonNull<Node>>,
@@ -131,6 +135,8 @@ impl LinkedList {
         Self { head: None }
     }
 
+    /// Add a node to the list.
+    /// O(1) runtime
     fn push_front(&mut self, block: &mut Node) {
         block.next = self.head;
         self.head = Some(NonNull::new(block).unwrap());
@@ -163,6 +169,8 @@ impl LinkedListTrait for LinkedList {
             .map(|non_null| unsafe { non_null.as_mut() })
     }
 
+    /// Remove a region from the list.
+    /// takes O(n) time
     fn remove(&mut self, region: PhysicalMemoryRegion) -> Option<&mut Node> {
         let mut last_node: Option<*mut Node> = None;
         let mut cur_node = self.front_mut().map(|node| node as *mut Node);
@@ -170,7 +178,7 @@ impl LinkedListTrait for LinkedList {
         while let Some(node_ptr) = cur_node {
             let node = unsafe { &mut *node_ptr };
             if node.region.start() == region.start() {
-                // If the node to remove is found, update the links
+                // If the node to be removed is found, update the links
                 match last_node {
                     Some(last_node_ptr) => unsafe { (*last_node_ptr).next = node.next },
                     None => self.head = node.next,
@@ -224,8 +232,10 @@ impl<'a> BuddyFrameAllocator {
         let mut current_start = start;
 
         while current_start < end {
+            // align blocks based on their start address
             let lowbit = if current_start > 0 {
                 current_start & (!current_start + 1)
+            // handle case where current_start = 0 so !current_start +1 would overflow
             } else {
                 64
             };
@@ -239,11 +249,11 @@ impl<'a> BuddyFrameAllocator {
                 .pop_front()
                 .expect("Buddy allocator memory pool exhausted");
 
-            // size not needed due to buddy array but lets make it clear
+            // size not needed due to buddy array but lets make it explicit
             node.region.set_size(size);
             node.region.set_start(current_start);
 
-            // 200 => 2 trailing zeros
+            // 0b100 => 2 trailing zeros
             self.buddies[size.trailing_zeros() as usize].push_front(node);
             current_start += size;
         }
@@ -267,7 +277,7 @@ impl<'a> BuddyFrameAllocator {
         }
     }
 
-    /// Alloc of power of two sized frame. The frame will have alignment equal to the size
+    /// Alloc power of two sized frame. The frame will have alignment equal to the size
     fn alloc_power_of_two(&mut self, size: u64) -> Option<&mut Node> {
         let class = size.trailing_zeros() as usize;
         // Find first non-empty size class
@@ -276,9 +286,13 @@ impl<'a> BuddyFrameAllocator {
                 continue;
             }
 
-            // split buddies. Only when i > class
+            // split buddies to obtain a chunk closest to the size we want to allocate
+            // traverse through multiple size layers if needed
+            // Only needed when i > class
             for j in (class + 1..i + 1).rev() {
                 if let Some(node) = self.buddies[j].pop_front() {
+                    // create two buddies of size class n -1 from 1 chunk of size
+                    // class n
                     let node = node.clone();
                     let region = &node.region;
 
@@ -295,7 +309,13 @@ impl<'a> BuddyFrameAllocator {
                         .set_start(region.start() + (1 << (j - 1)));
                     split_node2.region.set_size(1 << (j - 1));
 
-                    println!("Buddy allocator Split buddy: {:#x}", region.start(),);
+                    /*
+                    println!(
+                        "Buddy allocator Split buddy: b1.start: {:#x}, b2.start: {:#x}",
+                        region.start(),
+                        region.start() + (1 << (j - 1))
+                    );
+                    */
 
                     self.buddies[j - 1].push_front(split_node2);
                 } else {
@@ -317,14 +337,17 @@ impl<'a> BuddyFrameAllocator {
         let mut current_class = region.size().trailing_zeros() as usize;
 
         let mut region = region;
+
+        // keep merging buddies and moving 1 size class up until not possible anymore
         while current_class < self.buddies.len() {
             let mut buddy = region.clone();
             // buddy addresses differ by exactly 1 bit (the bit corresponding to the bit size)
             // therefore we can get buddy address by simply toggling the size bit
             buddy.set_start(region.start() ^ (1 << current_class));
-            // Only have to remove the buddy since dealloc => insert into buddy list
+            // TODO: removing a buddy is O(N). Could be sped up by using e.g. a B-Tree
             match self.buddies[current_class].remove(buddy) {
                 Some(buddy_node) => {
+                    // adjust region for higher size class
                     region.set_start(min(region.start(), buddy.start()));
                     region.set_size(region.size() * 2);
 

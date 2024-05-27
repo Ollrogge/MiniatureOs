@@ -2,20 +2,28 @@
 //! So close to kernel now :P
 #![no_std]
 #![no_main]
-use core::{arch::asm, panic::PanicInfo, ptr, slice};
+use core::{
+    arch::asm,
+    panic::PanicInfo,
+    ptr::{self},
+    slice,
+};
 mod elf;
 use crate::elf::KernelLoader;
 use api::{BootInfo, PhysicalMemoryRegions};
-use common::{hlt, BiosInfo, E820MemoryRegion};
+use common::{bump_frame_allocator::BumpFrameAllocator, hlt, BiosInfo, E820MemoryRegion};
 use core::alloc::Layout;
 use x86_64::{
-    frame_allocator::{BumpFrameAllocator, FrameAllocator},
     gdt::{self, SegmentDescriptor},
     memory::{
         Address, MemoryRegion, Page, PageSize, PhysicalAddress, PhysicalFrame,
-        PhysicalMemoryRegion, PhysicalMemoryRegionType, VirtualAddress, KIB,
+        PhysicalMemoryRegion, PhysicalMemoryRegionType, Size2MiB, Size4KiB, VirtualAddress, KIB,
+        TIB,
     },
-    paging::{FourLevelPageTable, Mapper, PageTable, PageTableEntryFlags},
+    paging::{
+        offset_page_table::{OffsetPageTable, PhysicalOffset},
+        FrameAllocator, Mapper, MapperAllSizes, PageTable, PageTableEntryFlags,
+    },
     println,
     register::{Cr0, Cr0Flags, Efer, EferFlags},
 };
@@ -23,7 +31,12 @@ use x86_64::{
 // hardcoded for now
 const KERNEL_VIRTUAL_BASE: u64 = 0xffffffff80000000;
 const KERNEL_STACK_TOP: u64 = 0xffffffff00000000;
-const KERNEL_STACK_SIZE: usize = 128 * KIB;
+const KERNEL_STACK_SIZE: u64 = 128 * KIB;
+// map the complete physical address space at this offset in order to enable
+// the kernel to easily access the page table
+// https://os.phil-opp.com/paging-implementation/#map-at-a-fixed-offset
+// map it at an offset of 10 TB
+const PHYSICAL_MEMORY_OFFSET: u64 = 10 * TIB;
 
 #[panic_handler]
 pub fn panic(info: &PanicInfo) -> ! {
@@ -60,11 +73,10 @@ fn context_switch(page_table: u64, stack_top: u64, entry_point: u64, boot_info: 
     unreachable!();
 }
 
-fn allocate_and_map_stack<A, M, S>(frame_allocator: &mut A, page_table: &mut M) -> VirtualAddress
+fn allocate_and_map_stack<A, M>(frame_allocator: &mut A, page_table: &mut M) -> VirtualAddress
 where
-    A: FrameAllocator<S>,
-    M: Mapper<S>,
-    S: PageSize,
+    A: FrameAllocator<Size4KiB>,
+    M: Mapper<Size4KiB>,
 {
     let end_page = Page::containing_address(VirtualAddress::new(KERNEL_STACK_TOP));
     // grows downwards
@@ -86,7 +98,7 @@ where
     }
 
     // catch kernel stack overflows
-    let guard_page = Page::containing_address(start_page.address - S::SIZE);
+    let guard_page = Page::containing_address(start_page.address - Size4KiB::SIZE);
     assert!(guard_page != start_page);
     let frame = frame_allocator
         .allocate_frame()
@@ -106,11 +118,10 @@ where
 
 // identity-map context switch function, so that we don't get an immediate pagefault
 // after switching the active page table
-fn identity_map_context_switch_function<A, M, S>(frame_allocator: &mut A, page_table: &mut M)
+fn identity_map_context_switch_function<A, M>(frame_allocator: &mut A, page_table: &mut M)
 where
-    A: FrameAllocator<S>,
-    M: Mapper<S>,
-    S: PageSize,
+    A: FrameAllocator<Size4KiB>,
+    M: Mapper<Size4KiB>,
 {
     let context_switch_function =
         PhysicalFrame::containing_address(PhysicalAddress::new(context_switch as *const () as u64));
@@ -120,11 +131,10 @@ where
         .expect("Identify mapping failed");
 }
 
-fn initialize_and_map_gdt<A, M, S>(frame_allocator: &mut A, page_table: &mut M)
+fn initialize_and_map_gdt<A, M>(frame_allocator: &mut A, page_table: &mut M)
 where
-    A: FrameAllocator<S>,
-    M: Mapper<S>,
-    S: PageSize,
+    A: FrameAllocator<Size4KiB>,
+    M: MapperAllSizes,
 {
     let frame = frame_allocator
         .allocate_frame()
@@ -204,16 +214,15 @@ where
     new_regions
 }
 
-fn allocate_and_map_boot_info<A, M, S>(
+fn allocate_and_map_boot_info<A, M>(
     frame_allocator: &mut A,
     page_table: &mut M,
     info: &BiosInfo,
     e820_memory_map: &[E820MemoryRegion],
 ) -> VirtualAddress
 where
-    A: FrameAllocator<S>,
-    M: Mapper<S>,
-    S: PageSize,
+    A: FrameAllocator<Size4KiB>,
+    M: MapperAllSizes,
 {
     let frame = frame_allocator
         .allocate_frame()
@@ -229,10 +238,8 @@ where
     let (combined_layout, memory_regions_offset) =
         boot_info_layout.extend(memory_regions_layout).unwrap();
 
-    // if this happens need a better allocator which can allocate > 1 frame
-    // and ensure they are contiguous
     assert!(
-        combined_layout.size() <= S::SIZE.try_into().unwrap(),
+        combined_layout.size() <= Size4KiB::SIZE.try_into().unwrap(),
         "Required memory for boot info is bigger than page size"
     );
 
@@ -259,6 +266,39 @@ where
         .expect("Failed to map boot info");
 
     virtual_address
+}
+
+fn map_complete_physical_memory_space_into_kernel<A, M>(
+    frame_allocator: &mut A,
+    page_table: &mut M,
+    max_address: PhysicalAddress,
+    offset: VirtualAddress,
+) where
+    A: FrameAllocator<Size4KiB>,
+    M: MapperAllSizes,
+{
+    let start = PhysicalFrame::containing_address(PhysicalAddress::new(0));
+    let end = PhysicalFrame::containing_address(max_address);
+    let alignment = Size2MiB::SIZE;
+    assert!(offset.as_u64() % alignment == 0);
+
+    for frame in PhysicalFrame::<Size2MiB>::range_inclusive(start, end) {
+        let page = Page::containing_address(offset + frame.start().as_u64());
+
+        /*
+        println!(
+            "Map: {:#x} -> {:#x}",
+            frame.start().as_u64(),
+            page.start().as_u64()
+        );
+        */
+        let flags = PageTableEntryFlags::PRESENT
+            | PageTableEntryFlags::WRITABLE
+            | PageTableEntryFlags::NO_EXECUTE;
+        page_table
+            .map_to(frame, page, flags, frame_allocator)
+            .expect("Failed to map all of RAM to kernel");
+    }
 }
 
 /// Enable the No execute enable bit in the Efer register
@@ -300,10 +340,12 @@ fn start(info: &BiosInfo) -> ! {
         .allocate_frame()
         .expect("Failed to allocate frame for kernel page table");
 
-    // 1:1 mapping, therefore frame address = virtual address
     let kernel_page_table_address = VirtualAddress::new(frame.address.as_u64());
     let kernel_page_table = PageTable::initialize_empty_at_address(kernel_page_table_address);
-    let mut page_table = FourLevelPageTable::new(kernel_page_table);
+
+    // 1:1 mapping
+    let mapping = PhysicalOffset::new(0);
+    let mut page_table = OffsetPageTable::new(kernel_page_table, mapping);
 
     let mut loader = KernelLoader::new(KERNEL_VIRTUAL_BASE, info, &mut page_table, &mut allocator);
     let kernel_entry_point = loader.load_kernel(info);
@@ -318,6 +360,15 @@ fn start(info: &BiosInfo) -> ! {
     // Otherwise memory regions information is incorrect
     let boot_info_address =
         allocate_and_map_boot_info(&mut allocator, &mut page_table, &info, memory_map);
+
+    let max_physical_address = allocator.max_physical_address();
+
+    map_complete_physical_memory_space_into_kernel(
+        &mut allocator,
+        &mut page_table,
+        max_physical_address,
+        VirtualAddress::new(PHYSICAL_MEMORY_OFFSET),
+    );
 
     // todo: detect RSDP (Root System Description Pointer)
     println!(

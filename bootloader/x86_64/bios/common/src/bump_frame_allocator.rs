@@ -1,36 +1,30 @@
-use crate::{
+use core::{clone::Clone, iter::Iterator, panic};
+use x86_64::{
     memory::{
         Address, MemoryRegion, PageSize, PhysicalAddress, PhysicalFrame, PhysicalMemoryRegion,
         Size4KiB,
     },
+    paging::FrameAllocator,
     println,
 };
-use core::{clone::Clone, iter::Iterator, panic};
-/// A trait for types that can allocate a frame of memory.
-///
-/// # Safety
-///
-/// The implementer of this trait must guarantee that the `allocate_frame`
-/// method returns only unique unused frames. Otherwise, undefined behavior
-/// may result from two callers modifying or deallocating the same frame.
-pub unsafe trait FrameAllocator<S: PageSize> {
-    /// Allocate a frame of the appropriate size and return it if possible.
-    fn allocate_frame(&mut self) -> Option<PhysicalFrame<S>>;
-}
 
 /// Very simple bump allocator. Allocates memory linearly and only keeps track
 /// of the number of allocated bytes and the number of allocations.
+///     - linearity is good for the bootloader since this won't fragment the
+///     the physical address space. With this we can build and pass a simple
+///     memory map to the kernel
 /// Can only free all memory at once.
 // https://os.phil-opp.com/allocator-designs/#bump-allocator
 pub struct BumpFrameAllocator<I: Iterator, D: MemoryRegion> {
     memory_map: I,
+    initial_memory_map: I,
     current_region: Option<D>,
     current_frame: PhysicalFrame,
 }
 
 impl<I, D> BumpFrameAllocator<I, D>
 where
-    I: Iterator<Item = D>,
+    I: Iterator<Item = D> + Clone,
     D: MemoryRegion,
 {
     // The frame passed to this function MUST be valid
@@ -47,10 +41,21 @@ where
             }
         }
         Self {
+            initial_memory_map: memory_map.clone(),
             memory_map: memory_map,
             current_region,
             current_frame: frame,
         }
+    }
+
+    pub fn max_physical_address(&self) -> PhysicalAddress {
+        PhysicalAddress::new(
+            self.initial_memory_map
+                .clone()
+                .map(|r| r.end())
+                .max()
+                .unwrap(),
+        )
     }
 }
 
@@ -74,15 +79,12 @@ where
                         next_frame =
                             PhysicalFrame::containing_address(PhysicalAddress::new(region.start()));
                         self.current_region = Some(region);
-                        println!("HELLO A");
                         break;
                     }
                     Some(_) => {
-                        println!("HELLO B");
                         continue;
                     }
                     None => {
-                        println!("HELLO C");
                         self.current_region = None;
                         break;
                     }

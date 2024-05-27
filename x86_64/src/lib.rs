@@ -1,5 +1,4 @@
 #![no_std]
-pub mod frame_allocator;
 pub mod gdt;
 pub mod idt;
 pub mod instructions;

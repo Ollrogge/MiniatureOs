@@ -21,3 +21,8 @@
 + use a different println in kernel and tests than the one exported by x86_64 crate. Defining it there is just a dirty hack to get println debugging working for this code
 
 + use reserved physicalmemory region type only for regions used by BIOS. Else use sth like allocated
+
++ write a logger that can be enabled per module, similar to RIOTS DEBUG macro
+
+
++ implement the MapperFlush functionality also in bootloader, to be forced to flush tlb later
