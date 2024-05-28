@@ -51,11 +51,11 @@ impl MemoryMap {
                 continue;
             }
 
-            entries_cnt += 1;
-
-            if cont_id == 0 || entries_cnt > size_of::<MemoryMap>() {
+            if cont_id == 0 || entries_cnt > memory_map.map.len() {
                 break;
             }
+
+            entries_cnt += 1;
         }
 
         memory_map.size = entries_cnt;

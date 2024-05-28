@@ -268,6 +268,7 @@ where
     virtual_address
 }
 
+// Map the complete physical address space at an
 fn map_complete_physical_memory_space_into_kernel<A, M>(
     frame_allocator: &mut A,
     page_table: &mut M,
@@ -285,13 +286,6 @@ fn map_complete_physical_memory_space_into_kernel<A, M>(
     for frame in PhysicalFrame::<Size2MiB>::range_inclusive(start, end) {
         let page = Page::containing_address(offset + frame.start().as_u64());
 
-        /*
-        println!(
-            "Map: {:#x} -> {:#x}",
-            frame.start().as_u64(),
-            page.start().as_u64()
-        );
-        */
         let flags = PageTableEntryFlags::PRESENT
             | PageTableEntryFlags::WRITABLE
             | PageTableEntryFlags::NO_EXECUTE;
