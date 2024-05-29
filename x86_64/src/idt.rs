@@ -1,5 +1,14 @@
 //! This module implements functionality for the x86 interrupt descriptor table
 //!
+//! There are two kinds of interrupts: interrupts due to bad (exceptions) code
+//! or the ones that occur to handle events unrelated to currently executing code
+//!
+//!     Faults: These can be corrected and the program may continue as if nothing happened
+//!     Traps: Traps are reported immediately after the execution of the trapping instruction.
+//!     Aborts: Some severe unrecoverable error.
+//!
+//! Interrupt vs trap gate: when you call an interrupt-gate, interrupts get disabled,
+//! and when you call a trap-gate, they don't
 //!
 use crate::{const_assert, gdt::SegmentSelector, println, register::CS, PrivilegeLevel};
 use bit_field::BitField;
@@ -10,10 +19,9 @@ pub struct InterruptDescriptorOptions(u16);
 
 impl Default for InterruptDescriptorOptions {
     fn default() -> Self {
-        const INTERRUPT_GATE_ID: u16 = 0xe;
-        let mut options = 0;
-        options.set_bits(8..=11, INTERRUPT_GATE_ID);
-        InterruptDescriptorOptions(options)
+        // dpl = 0, type = 0xb1110
+        const DEFAULT_INTERRUPT_GATE_64: u16 = 0xe << 8;
+        InterruptDescriptorOptions(DEFAULT_INTERRUPT_GATE_64)
     }
 }
 
@@ -37,7 +45,9 @@ impl InterruptDescriptorOptions {
     ///
     /// This is an offset into the Interrupt Stack Table, which is stored in the Task State Segment
     pub fn set_interrupt_stack_index(&mut self, index: u16) -> &mut Self {
-        self.0.set_bits(0..=2, index);
+        // The hardware IST index starts at 1, but our software IST index
+        // starts at 0. Therefore we need to add 1 here.
+        self.0.set_bits(0..=2, index + 1);
         self
     }
 }
@@ -67,7 +77,15 @@ impl InterruptDescriptor {
         }
     }
 
-    pub fn set_handler_function(&mut self, handler: HandlerFunc) {
+    /// Sets hanlder address for IDT entry
+    ///
+    /// # Safety
+    ///
+    /// Unsafe because caller must ensure that the HandlerFunc passed is valid
+    pub unsafe fn set_handler_function(
+        &mut self,
+        handler: HandlerFunc,
+    ) -> &mut InterruptDescriptorOptions {
         let handler_address = handler as u64;
         self.pointer_low = handler_address as u16;
         self.pointer_middle = (handler_address >> 16) as u16;
@@ -76,6 +94,8 @@ impl InterruptDescriptor {
         self.segment_selector = CS::read().into();
 
         self.options.set_present(true);
+
+        &mut self.options
     }
 }
 

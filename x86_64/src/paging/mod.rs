@@ -1,5 +1,6 @@
 use crate::memory::{
-    Address, Page, PageSize, PhysicalAddress, PhysicalFrame, Size2MiB, Size4KiB, VirtualAddress,
+    Address, FrameAllocator, Page, PageSize, PhysicalAddress, PhysicalFrame, Size2MiB, Size4KiB,
+    VirtualAddress,
 };
 use bit_field::BitField;
 use bitflags::bitflags;
@@ -12,18 +13,6 @@ use core::{
 
 pub mod mapped_page_table;
 pub mod offset_page_table;
-
-/// A trait for types that can allocate a frame of memory.
-///
-/// # Safety
-///
-/// The implementer of this trait must guarantee that the `allocate_frame`
-/// method returns only unique unused frames. Otherwise, undefined behavior
-/// may result from two callers modifying or deallocating the same frame.
-pub unsafe trait FrameAllocator<S: PageSize> {
-    /// Allocate a frame of the appropriate size and return it if possible.
-    fn allocate_frame(&mut self) -> Option<PhysicalFrame<S>>;
-}
 
 bitflags! {
     /// Possible flags for a page table entry.

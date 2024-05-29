@@ -4,7 +4,15 @@ use core::{
     fmt::{self, Debug},
 };
 use lazy_static::lazy_static;
-use x86_64::{idt::InterruptDescriptorTable, instructions::int3, println};
+use x86_64::{
+    gdt::{GlobalDescriptorTable, SegmentDescriptor, SegmentSelector},
+    idt::InterruptDescriptorTable,
+    instructions::int3,
+    memory::{Address, VirtualAddress},
+    println,
+    register::{CS, SS},
+    tss::{TaskStateSegment, DOUBLE_FAULT_IST_IDX},
+};
 
 // todo: https://os.phil-opp.com/catching-exceptions/
 // cur: https://os.phil-opp.com/double-fault-exceptions/
@@ -31,6 +39,18 @@ macro_rules! pop_scratch_registers {
 // an anonymous namespace.
 // Wrapper is naked to prevent the rust compiler from emitting the function prologue
 // and epilogue
+
+// stack frame layout when exception occurs: CPU pushes the stack and
+// instruction pointers (with their segment descriptors), the RFLAGS register,
+// and an optional error code
+// RFLAGS registers contains the IF (interrupt enable flag). When using iretq
+// the interrupt enable flag will be set to the value it had before the interrupt occured.
+// => Therefore we don't need to re-enable interrupts even though we are using
+// an interrupt gate
+
+// diff interrupt, trap gate:
+//  when you call an interrupt-gate, interrupts get disabled, and when you
+//  call a trap-gate, they don't
 
 // pointer alignment needed since exception frame = 5 registers + 9 scratch registers + 1 error code = 15 => unaligned
 macro_rules! handler_with_error_code {
@@ -84,27 +104,78 @@ lazy_static! {
     static ref IDT: InterruptDescriptorTable = {
         let mut idt = InterruptDescriptorTable::default();
 
-        idt.divide_error
-            .set_handler_function(handler_without_error_code!(divide_by_zero_handler));
-        idt.breakpoint
-            .set_handler_function(handler_without_error_code!(breakpoint_handler));
-        idt.invalid_opcode
-            .set_handler_function(handler_without_error_code!(invalid_opcode_handler));
+        unsafe {
+            idt.divide_error
+                .set_handler_function(handler_without_error_code!(divide_by_zero_handler));
+            idt.breakpoint
+                .set_handler_function(handler_without_error_code!(breakpoint_handler));
+            idt.invalid_opcode
+                .set_handler_function(handler_without_error_code!(invalid_opcode_handler));
 
-        /*
-        idt.page_fault
-            .set_handler_function(handler_with_error_code!(page_fault_handler));
-        */
-        idt.alignment_check
-            .set_handler_function(handler_with_error_code!(alignment_check_handler));
-        idt.double_fault
-            .set_handler_function(handler_with_error_code!(double_fault_handler));
+            /*
+            idt.page_fault
+                .set_handler_function(handler_with_error_code!(page_fault_handler));
+            */
+
+            idt.alignment_check
+                .set_handler_function(handler_with_error_code!(alignment_check_handler));
+            idt.double_fault
+                .set_handler_function(handler_with_error_code!(double_fault_handler))
+                .set_interrupt_stack_index(DOUBLE_FAULT_IST_IDX as u16);
+        }
 
         idt
     };
 }
 
+lazy_static! {
+    static ref TSS: TaskStateSegment = {
+        let mut tss = TaskStateSegment::new();
+        tss.interrupt_stack_table[DOUBLE_FAULT_IST_IDX] = {
+            const STACK_SIZE: usize = 4096 * 5;
+            static mut STACK: [u8; STACK_SIZE] = [0; STACK_SIZE];
+
+            let stack_start = VirtualAddress::from_ptr(unsafe { &STACK });
+            let stack_end = stack_start + STACK_SIZE;
+
+            stack_end
+        };
+
+        tss
+    };
+}
+
+lazy_static! {
+    static ref GDT: (
+        GlobalDescriptorTable,
+        SegmentSelector,
+        SegmentSelector,
+        SegmentSelector
+    ) = {
+        let mut gdt = GlobalDescriptorTable::new();
+        let tss_selector = gdt.add_entry(SegmentDescriptor::new_tss_segment(&TSS));
+        let kernel_code_selector = gdt.add_entry(SegmentDescriptor::kernel_code_segment());
+        let kernel_data_selector = gdt.add_entry(SegmentDescriptor::kernel_data_segment());
+        (
+            gdt,
+            tss_selector,
+            kernel_code_selector,
+            kernel_data_selector,
+        )
+    };
+}
+
 pub fn init() {
+    // load the gdt
+    GDT.0.load();
+    unsafe {
+        // update cs and ss segment registers as they have to point to sane selectors
+        CS::write(GDT.2);
+        SS::write(GDT.3);
+        // load the tss selector into the task register
+        TaskStateSegment::load(GDT.1);
+    }
+
     IDT.load();
 }
 

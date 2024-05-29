@@ -16,13 +16,13 @@ use core::alloc::Layout;
 use x86_64::{
     gdt::{self, SegmentDescriptor},
     memory::{
-        Address, MemoryRegion, Page, PageSize, PhysicalAddress, PhysicalFrame,
+        Address, FrameAllocator, MemoryRegion, Page, PageSize, PhysicalAddress, PhysicalFrame,
         PhysicalMemoryRegion, PhysicalMemoryRegionType, Size2MiB, Size4KiB, VirtualAddress, KIB,
         TIB,
     },
     paging::{
         offset_page_table::{OffsetPageTable, PhysicalOffset},
-        FrameAllocator, Mapper, MapperAllSizes, PageTable, PageTableEntryFlags,
+        Mapper, MapperAllSizes, PageTable, PageTableEntryFlags,
     },
     println,
     register::{Cr0, Cr0Flags, Efer, EferFlags},
@@ -255,7 +255,12 @@ where
     // write bootinfo to allocated frame
     let memory_regions =
         PhysicalMemoryRegions::new(memory_regions_ptr, usable_memory_regions_amount);
-    let boot_info = BootInfo::new(info.kernel, info.framebuffer, memory_regions);
+    let boot_info = BootInfo::new(
+        info.kernel,
+        info.framebuffer,
+        memory_regions,
+        PHYSICAL_MEMORY_OFFSET,
+    );
     unsafe { ptr::write(frame.address.as_mut_ptr(), boot_info) };
 
     let virtual_address = VirtualAddress::new(frame.address.as_u64());

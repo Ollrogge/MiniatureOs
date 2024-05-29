@@ -2,7 +2,10 @@ extern crate alloc;
 use alloc::collections::BTreeSet;
 use core::{array, cmp::min, mem::MaybeUninit, ops::DerefMut, ptr::NonNull, u64::MAX};
 use x86_64::{
-    memory::{MemoryRegion, PhysicalMemoryRegion, PhysicalMemoryRegionType},
+    memory::{
+        FrameAllocator, MemoryRegion, PageSize, PhysicalAddress, PhysicalFrame,
+        PhysicalMemoryRegion, PhysicalMemoryRegionType, Size2MiB, Size4KiB,
+    },
     println,
 };
 // todo: make a frame_allocators directory
@@ -366,5 +369,23 @@ impl<'a> BuddyFrameAllocator {
                 }
             }
         }
+    }
+}
+
+unsafe impl FrameAllocator<Size4KiB> for BuddyFrameAllocator {
+    fn allocate_frame(&mut self) -> Option<PhysicalFrame<Size4KiB>> {
+        let region = self.alloc(Size4KiB::SIZE)?;
+        let frame = PhysicalFrame::containing_address(PhysicalAddress::new(region.start()));
+
+        Some(frame)
+    }
+}
+
+unsafe impl FrameAllocator<Size2MiB> for BuddyFrameAllocator {
+    fn allocate_frame(&mut self) -> Option<PhysicalFrame<Size2MiB>> {
+        let region = self.alloc(Size2MiB::SIZE)?;
+        let frame = PhysicalFrame::containing_address(PhysicalAddress::new(region.start()));
+
+        Some(frame)
     }
 }

@@ -51,6 +51,8 @@ fn trigger_divide_by_zero() {
 }
 
 // should cause a pagefault because guard page is hit
+// to trigger double fault: unregister page fault handler. Then a page fault
+// will be raised which triggers a double fault since the descriptor is invalid
 fn stack_overflow() {
     stack_overflow()
 }
@@ -124,6 +126,8 @@ fn test_buddy_allocator(allocator: &mut BuddyFrameAllocator) {
     println!("Test: {:#x} {:#x}", c4.start(), addr);
 
     assert!(c4.start() == addr);
+
+    println!("Testing buddy allocator done");
 }
 
 fn start(info: &'static BootInfo) -> ! {
@@ -145,11 +149,10 @@ fn start(info: &'static BootInfo) -> ! {
     /*
      */
     trigger_int3();
-    trigger_page_fault();
 
-    println!("Did not crash, successfully returned from int3");
+    //trigger_page_fault();
 
-    //stack_overflow();
+    stack_overflow();
 
     loop {}
 }

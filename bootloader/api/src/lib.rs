@@ -76,6 +76,7 @@ pub struct BootInfo {
     pub kernel: PhysicalMemoryRegion,
     pub framebuffer: FramebufferInfo,
     pub memory_regions: PhysicalMemoryRegions,
+    pub physical_memory_offset: u64,
 }
 
 impl BootInfo {
@@ -83,11 +84,13 @@ impl BootInfo {
         kernel: PhysicalMemoryRegion,
         framebuffer: FramebufferInfo,
         memory_regions: PhysicalMemoryRegions,
+        physical_memory_offset: u64,
     ) -> Self {
         Self {
             kernel,
             framebuffer,
             memory_regions,
+            physical_memory_offset,
         }
     }
 }

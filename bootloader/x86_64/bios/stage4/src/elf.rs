@@ -2,10 +2,13 @@ use common::BiosInfo;
 use core::{cmp, marker::PhantomData, mem, ops::Add, ptr, slice};
 use elfloader::{arch::x86_64::RelocationTypes, *};
 use x86_64::{
-    memory::{Address, Page, PageSize, PhysicalAddress, PhysicalFrame, Size4KiB, VirtualAddress},
+    memory::{
+        Address, FrameAllocator, Page, PageSize, PhysicalAddress, PhysicalFrame, Size4KiB,
+        VirtualAddress,
+    },
     paging::{
-        mapped_page_table::MappedPageTable, FrameAllocator, Mapper, MapperAllSizes, PageTable,
-        PageTableEntryFlags, Translator, TranslatorAllSizes,
+        mapped_page_table::MappedPageTable, Mapper, MapperAllSizes, PageTable, PageTableEntryFlags,
+        Translator, TranslatorAllSizes,
     },
     println,
 };

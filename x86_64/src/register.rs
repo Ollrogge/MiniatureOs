@@ -1,4 +1,8 @@
 //! This module implements helper functions for x86 registers
+use crate::{
+    gdt::SegmentSelector,
+    memory::{Address, PhysicalAddress, PhysicalFrame},
+};
 use bitflags::bitflags;
 use core::arch::asm;
 
@@ -154,6 +158,8 @@ bitflags! {
     }
 }
 
+/// Control register 0. This register holds various configuration flags indicating
+/// stuff like that cpu is in protected mode, or that paging is enabled
 #[derive(Debug)]
 pub struct Cr0;
 
@@ -182,7 +188,7 @@ impl Cr0 {
         cr0 as u64
     }
 
-    /// Reads the EFER flags.
+    /// Reads the CR0 flags.
     fn read() -> Cr0Flags {
         Cr0Flags::from_bits_truncate(Self::read_raw())
     }
@@ -208,7 +214,105 @@ impl Cr0 {
     }
 }
 
-/// Code segment register
+bitflags! {
+    /// Controls cache settings for the highest-level page table.
+    ///
+    /// Unused if paging is disabled or if [`PCID`](Cr4Flags::PCID) is enabled.
+    #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Clone, Copy)]
+    pub struct Cr3Flags: u64 {
+        /// Use a writethrough cache policy for the table (otherwise a writeback policy is used).
+        const PAGE_LEVEL_WRITETHROUGH = 1 << 3;
+        /// Disable caching for the table.
+        const PAGE_LEVEL_CACHE_DISABLE = 1 << 4;
+    }
+}
+
+#[derive(Debug)]
+pub struct Cr3;
+
+impl Cr3 {
+    /// Updates CR3 register flags.
+    ///
+    /// # Safety
+    ///
+    /// Unsafe because it’s possible to break memory safety with wrong flags,
+    /// e.g. by disabling paging
+    pub unsafe fn update_flags<F>(f: F)
+    where
+        F: FnOnce(&mut Cr3Flags),
+    {
+        let (pml4t, mut flags) = Self::read();
+        f(&mut flags);
+        Self::write(pml4t, flags);
+    }
+
+    /// Updates CR3 page directory base address
+    ///
+    /// # Safety
+    ///
+    /// Unsafe because it’s possible to break memory safety with a wrong address
+    pub unsafe fn update_pml4t_base(pml4t: PhysicalFrame) {
+        let (_, flags) = Self::read();
+        Self::write(pml4t, flags);
+    }
+
+    /// Reads the raw EFER register.
+    pub fn read_raw() -> u64 {
+        let mut cr0: usize;
+        unsafe {
+            asm!("mov {}, cr0", out(reg) cr0, options(nomem, nostack, preserves_flags));
+        }
+        cr0 as u64
+    }
+
+    /// Read pml4t address and CR3 flags
+    pub fn read() -> (PhysicalFrame, Cr3Flags) {
+        let raw = Self::read_raw();
+        let frame =
+            PhysicalFrame::containing_address(PhysicalAddress::new(raw & 0x_000f_ffff_ffff_f000));
+        let flags = Cr3Flags::from_bits_truncate(raw & 0xfff);
+        (frame, flags)
+    }
+
+    /// Writes CR0 flags
+    ///
+    /// Does not preserve any values
+    ///
+    /// # Safety
+    ///
+    /// Unsafe because it’s possible to break memory safety with wrong flags,
+    /// e.g. by disabling paging
+    pub unsafe fn write(frame: PhysicalFrame, val: Cr3Flags) {
+        unsafe { Self::write_raw(frame.start().as_u64() | val.bits()) }
+    }
+
+    /// Writes a raw value to the CR0 register
+    ///
+    /// # Safety
+    ///
+    /// Unsafe because it’s possible to break memory safety with wrong flags,
+    /// e.g. by disabling paging
+    pub unsafe fn write_raw(val: u64) {
+        unsafe { asm!("mov cr0, {}", in(reg) val as usize, options(nostack, preserves_flags)) };
+    }
+}
+
+/// Code Segment
+///
+/// While most fields in the Code-Segment [`Descriptor`] are unused in 64-bit
+/// long mode, some of them must be set to a specific value. The
+/// [`EXECUTABLE`](DescriptorFlags::EXECUTABLE),
+/// [`USER_SEGMENT`](DescriptorFlags::USER_SEGMENT), and
+/// [`LONG_MODE`](DescriptorFlags::LONG_MODE) bits must be set, while the
+/// [`DEFAULT_SIZE`](DescriptorFlags::DEFAULT_SIZE) bit must be unset.
+///
+/// The [`DPL_RING_3`](DescriptorFlags::DPL_RING_3) field can be used to change
+/// privilege level. The [`PRESENT`](DescriptorFlags::PRESENT) bit can be used
+/// to make a segment present or not present.
+///
+/// All other fields (like the segment base and limit) are ignored by the
+/// processor and setting them has no effect.
+#[derive(Debug)]
 pub struct CS;
 
 impl CS {
@@ -221,16 +325,133 @@ impl CS {
 
     /// Writes to the code segment register
     ///
+    /// Since wen can't directly write to the cs register push selector + new
+    /// rip onto stack and retf
+    ///
     /// # Safety
     ///
     /// Directly writing to the code segment register can lead to undefined
     /// behavior if the value is wrong
-    pub unsafe fn write(val: u16) {
+    ///
+    #[cfg(target_arch = "x86_64")]
+    pub unsafe fn write(val: SegmentSelector) {
         unsafe {
             asm!(
-                "mov cs, {:x}", in(reg) val,
+                "push {sel}",
+                "lea {tmp}, [1f + rip]",
+                "push {tmp}",
+                "retfq",
+                "1:",
+                sel = in(reg) usize::from(val.raw()),
+                tmp = lateout(reg) _,
+                options(preserves_flags),
+            );
+        }
+    }
+}
+
+/// Stack Segment
+///
+/// Entirely unused in 64-bit mode; setting the segment register does nothing.
+/// However, in ring 3, the SS register still has to point to a valid
+/// [`Descriptor`] (it cannot be zero). This
+/// means a user-mode read/write segment descriptor must be present in the GDT.
+///
+/// This register is also set by the `syscall`/`sysret` and
+/// `sysenter`/`sysexit` instructions (even on 64-bit transitions). This is to
+/// maintain symmetry with 32-bit transitions where setting SS actually will
+/// actually have an effect.
+pub struct SS;
+impl SS {
+    /// Reads the code segment register
+    pub fn read() -> u16 {
+        let mut ss: u16;
+        unsafe { asm!("mov {:x}, cs", out(reg) ss, options(nostack, nomem, preserves_flags)) };
+        ss
+    }
+
+    /// Writes to the code segment register
+    ///
+    /// # Safety
+    ///
+    /// Directly writing to the code segment register can lead to undefined
+    /// behavior if the value is wrong
+    pub unsafe fn write(val: SegmentSelector) {
+        unsafe {
+            asm!(
+                "mov ss, {:x}", in(reg) val.raw(),
                 options(nostack, nomem, preserves_flags)
             )
         };
     }
 }
+
+/// Data Segment
+///
+/// Entirely unused in 64-bit mode; setting the segment register does nothing.
+#[derive(Debug)]
+pub struct DS;
+impl DS {
+    /// Reads the ds register
+    pub fn read() -> u16 {
+        let mut ds: u16;
+        unsafe { asm!("mov {:x}, ds", out(reg) ds, options(nostack, nomem, preserves_flags)) };
+        ds
+    }
+
+    /// Writes to the ds register
+    ///
+    /// # Safety
+    ///
+    /// Directly writing to the ds register can lead to undefined behavior
+    pub unsafe fn write(val: u16) {
+        unsafe {
+            asm!(
+                "mov ds, {:x}", in(reg) val,
+                options(nostack, nomem, preserves_flags)
+            )
+        };
+    }
+}
+
+/// ES Segment
+///
+/// Entirely unused in 64-bit mode; setting the segment register does nothing.
+#[derive(Debug)]
+pub struct ES;
+impl ES {
+    /// Reads the es register
+    pub fn read() -> u16 {
+        let mut es: u16;
+        unsafe { asm!("mov {:x}, es", out(reg) es, options(nostack, nomem, preserves_flags)) };
+        es
+    }
+
+    /// Writes to the es register
+    ///
+    /// # Safety
+    ///
+    /// Directly writing to the es register can lead to undefined behavior
+    pub unsafe fn write(val: u16) {
+        unsafe {
+            asm!(
+                "mov es, {:x}", in(reg) val,
+                options(nostack, nomem, preserves_flags)
+            )
+        };
+    }
+}
+
+/// FS Segment
+///
+/// Only base is used in 64-bit mode, see [`Segment64`]. This is often used in
+/// user-mode for Thread-Local Storage (TLS).
+#[derive(Debug)]
+pub struct FS;
+
+/// GS Segment
+///
+/// Only base is used in 64-bit mode, see [`Segment64`]. In kernel-mode, the GS
+/// base often points to a per-cpu kernel data structure.
+#[derive(Debug)]
+pub struct GS;

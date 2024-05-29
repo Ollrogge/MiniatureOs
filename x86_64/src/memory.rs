@@ -1,4 +1,3 @@
-use crate::println;
 use bit_field::BitField;
 use core::{
     fmt::{self, Display, Formatter, LowerHex, Result},
@@ -10,6 +9,18 @@ pub const KIB: u64 = 1024;
 pub const MIB: u64 = KIB * 1024;
 pub const GIB: u64 = MIB * 1024;
 pub const TIB: u64 = GIB * 1024;
+
+/// A trait for types that can allocate a frame of memory.
+///
+/// # Safety
+///
+/// The implementer of this trait must guarantee that the `allocate_frame`
+/// method returns only unique unused frames. Otherwise, undefined behavior
+/// may result from two callers modifying or deallocating the same frame.
+pub unsafe trait FrameAllocator<S: PageSize> {
+    /// Allocate a frame of the appropriate size and return it if possible.
+    fn allocate_frame(&mut self) -> Option<PhysicalFrame<S>>;
+}
 
 pub trait MemoryRegion: Copy + core::fmt::Debug {
     fn start(&self) -> u64;
@@ -223,13 +234,18 @@ impl VirtualAddress {
         self.0 & (align - 1) == 0
     }
 
-    pub fn align_down(&self, align: u64) -> VirtualAddress {
+    pub fn align_down(&self, align: u64) -> Self {
         let addr = self.0 & !(align - 1);
         VirtualAddress(addr)
     }
 
-    pub fn align_up(&self, align: u64) -> VirtualAddress {
+    pub fn align_up(&self, align: u64) -> Self {
         let addr = (self.0 + align - 1) & !(align - 1);
+        VirtualAddress(addr)
+    }
+
+    pub fn from_ptr<T>(ptr: &T) -> Self {
+        let addr = ptr as *const _ as u64;
         VirtualAddress(addr)
     }
 

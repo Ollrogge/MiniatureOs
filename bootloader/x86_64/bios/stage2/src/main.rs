@@ -70,7 +70,6 @@ pub extern "C" fn _start(disk_number: u16, partition_table_start: *const u8) -> 
 //  Memory region, start: 0x100000, length: 0x7ee0000, type: Normal, attributes: 0x0
 //  Memory region, start: 0x7fe0000, length: 0x20000, type: Reserved, attributes: 0x0
 //  Memory region, start: 0xfffc0000, length: 0x40000, type: Reserved, attributes: 0x0
-//  Memory region, start: 0xfd00000000, length: 0x300000000, type: Reserved, attributes: 0x0
 fn print_memory_map(map: &MemoryMap) {
     for region in map.iter() {
         println!(

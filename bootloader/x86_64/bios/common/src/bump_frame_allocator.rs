@@ -1,10 +1,9 @@
 use core::{clone::Clone, iter::Iterator, panic};
 use x86_64::{
     memory::{
-        Address, MemoryRegion, PageSize, PhysicalAddress, PhysicalFrame, PhysicalMemoryRegion,
-        Size4KiB,
+        Address, FrameAllocator, MemoryRegion, PageSize, PhysicalAddress, PhysicalFrame,
+        PhysicalMemoryRegion, Size4KiB,
     },
-    paging::FrameAllocator,
     println,
 };
 
