@@ -16,9 +16,7 @@ use x86_64::{
 // https://os.phil-opp.com/allocator-designs/#bump-allocator
 pub struct BumpFrameAllocator<I: Iterator, D: MemoryRegion> {
     memory_map: I,
-    initial_memory_map: I,
-    current_region: Option<D>,
-    current_frame: PhysicalFrame,
+    next: usize,
 }
 
 impl<I, D> BumpFrameAllocator<I, D>
@@ -40,21 +38,20 @@ where
             }
         }
         Self {
-            initial_memory_map: memory_map.clone(),
             memory_map: memory_map,
-            current_region,
-            current_frame: frame,
+            next: 0,
         }
     }
 
     pub fn max_physical_address(&self) -> PhysicalAddress {
-        PhysicalAddress::new(
-            self.initial_memory_map
-                .clone()
-                .map(|r| r.end())
-                .max()
-                .unwrap(),
-        )
+        PhysicalAddress::new(self.memory_map.clone().map(|r| r.end()).max().unwrap())
+    }
+
+    fn usable_frames(&self) -> impl Iterator<Item = PhysicalFrame> {
+        let usable_regions = self.memory_map.filter(|r| r.is_usable());
+        let addr_ranges = usable_regions.map(|r| r.start()..r.end());
+        let frame_addresses = addr_ranges.flat_map(|r| r.step_by(PageSize::SIZE));
+        frame_addresses.map(|addr| PhysicalFrame::containing_address(addr))
     }
 }
 
@@ -64,35 +61,8 @@ where
     D: MemoryRegion,
 {
     fn allocate_frame(&mut self) -> Option<PhysicalFrame<Size4KiB>> {
-        let current_frame = self.current_frame;
-        // Only time we cant find any more frames is when we are out of regions
-        // in this case this will return None
-        let current_region = self.current_region?;
-
-        let mut next_frame = current_frame + 1;
-
-        if !current_region.contains(next_frame.address.as_u64()) {
-            loop {
-                match self.memory_map.next() {
-                    Some(region) if region.is_usable() => {
-                        next_frame =
-                            PhysicalFrame::containing_address(PhysicalAddress::new(region.start()));
-                        self.current_region = Some(region);
-                        break;
-                    }
-                    Some(_) => {
-                        continue;
-                    }
-                    None => {
-                        self.current_region = None;
-                        break;
-                    }
-                }
-            }
-        }
-
-        self.current_frame = next_frame;
-
-        Some(current_frame)
+        let frame = self.usable_frames().nth(self.next);
+        self.next += 1;
+        frame
     }
 }
