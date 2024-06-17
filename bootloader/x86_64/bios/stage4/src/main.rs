@@ -2,6 +2,7 @@
 //! So close to kernel now :P
 #![no_std]
 #![no_main]
+#![feature(naked_functions)]
 use core::{
     arch::asm,
     panic::PanicInfo,
@@ -9,9 +10,10 @@ use core::{
     slice,
 };
 mod elf;
+mod interrupts;
 use crate::elf::KernelLoader;
 use api::{BootInfo, PhysicalMemoryRegions};
-use common::{bump_frame_allocator::BumpFrameAllocator, hlt, BiosInfo, E820MemoryRegion};
+use common::{hlt, BiosInfo, E820MemoryRegion};
 use core::alloc::Layout;
 use x86_64::{
     gdt::{self, SegmentDescriptor},
@@ -21,6 +23,7 @@ use x86_64::{
         TIB,
     },
     paging::{
+        bump_frame_allocator::BumpFrameAllocator,
         offset_page_table::{OffsetPageTable, PhysicalOffset},
         Mapper, MapperAllSizes, PageTable, PageTableEntryFlags,
     },
@@ -94,7 +97,8 @@ where
 
         page_table
             .map_to(frame, page, flags, frame_allocator)
-            .expect("Failed to map stack");
+            .expect("Failed to map stack page")
+            .ignore();
     }
 
     // catch kernel stack overflows
@@ -111,7 +115,8 @@ where
             PageTableEntryFlags::NONE,
             frame_allocator,
         )
-        .expect("Failed to map guard page");
+        .expect("Failed to map guard page")
+        .ignore();
 
     end_page.address
 }
@@ -128,7 +133,8 @@ where
     let flags = PageTableEntryFlags::PRESENT;
     page_table
         .identity_map(context_switch_function, flags, frame_allocator)
-        .expect("Identify mapping failed");
+        .expect("Identify mapping failed")
+        .ignore();
 }
 
 fn initialize_and_map_gdt<A, M>(frame_allocator: &mut A, page_table: &mut M)
@@ -156,7 +162,8 @@ where
     // TODO: why is this actually needed ? cpu accesses the gdt based on physical address
     page_table
         .identity_map(frame, PageTableEntryFlags::PRESENT, frame_allocator)
-        .expect("Identity mapping gdt failed");
+        .expect("Identity mapping gdt failed")
+        .ignore();
 }
 
 /// Returns the current state of the memory (which regions are used and which are not)
@@ -177,7 +184,14 @@ where
             new_regions[idx] = Some(region.into());
             idx += 1;
         } else {
-            // split region into usable and unusable pair fi the region is not
+            // MBR & stage1, stage2 region => mark as used
+            if region.start() == 0x0 {
+                let mut new_region: PhysicalMemoryRegion = region.into();
+                new_region.typ = PhysicalMemoryRegionType::Reserved;
+                new_regions[idx] = Some(new_region);
+                continue;
+            }
+            // split region into usable and unusable pair if the region is not
             // completely allocated
             if region.contains(last_frame.address.as_u64()) {
                 let sz = last_frame.end() - region.start();
@@ -268,35 +282,42 @@ where
 
     page_table
         .map_to(frame, page, PageTableEntryFlags::PRESENT, frame_allocator)
-        .expect("Failed to map boot info");
+        .expect("Failed to map boot info")
+        .ignore();
 
     virtual_address
 }
 
-// Map the complete physical address space at an
+// Map the complete physical address space at an offset into kernel memory space
 fn map_complete_physical_memory_space_into_kernel<A, M>(
     frame_allocator: &mut A,
     page_table: &mut M,
-    max_address: PhysicalAddress,
+    highest_physical_address: PhysicalAddress,
     offset: VirtualAddress,
 ) where
     A: FrameAllocator<Size4KiB>,
     M: MapperAllSizes,
 {
+    println!(
+        "Mapping complete physical address space to offset: {:#x}",
+        offset.as_u64()
+    );
     let start = PhysicalFrame::containing_address(PhysicalAddress::new(0));
-    let end = PhysicalFrame::containing_address(max_address);
+    let end = PhysicalFrame::containing_address(highest_physical_address);
     let alignment = Size2MiB::SIZE;
+    // check 2MiB alignment
     assert!(offset.as_u64() % alignment == 0);
 
     for frame in PhysicalFrame::<Size2MiB>::range_inclusive(start, end) {
-        let page = Page::containing_address(offset + frame.start().as_u64());
+        let page = Page::containing_address(offset + frame.start());
 
         let flags = PageTableEntryFlags::PRESENT
             | PageTableEntryFlags::WRITABLE
             | PageTableEntryFlags::NO_EXECUTE;
         page_table
             .map_to(frame, page, flags, frame_allocator)
-            .expect("Failed to map all of RAM to kernel");
+            .expect("Failed to map all of RAM to kernel space")
+            .ignore();
     }
 }
 
@@ -314,9 +335,14 @@ fn enable_write_protect_bit() {
         Cr0::update(|val| *val |= Cr0Flags::WRITE_PROTECT);
     }
 }
+fn trigger_page_fault() {
+    unsafe { *(0xdeabeefdead as *mut u8) = 42 };
+}
 
 fn start(info: &BiosInfo) -> ! {
     println!("Stage4");
+
+    interrupts::init();
 
     enable_nxe_bit();
     enable_write_protect_bit();
@@ -335,13 +361,13 @@ fn start(info: &BiosInfo) -> ! {
     let mut allocator =
         BumpFrameAllocator::new_starting_at(next_free_frame, memory_map.iter().copied().peekable());
 
-    let frame = allocator
+    let kernel_page_table_frame = allocator
         .allocate_frame()
         .expect("Failed to allocate frame for kernel page table");
 
-    let kernel_page_table_address = VirtualAddress::new(frame.address.as_u64());
-    let kernel_page_table = PageTable::initialize_empty_at_address(kernel_page_table_address);
-
+    let kernel_page_table_address = VirtualAddress::new(kernel_page_table_frame.start());
+    let kernel_page_table =
+        unsafe { PageTable::initialize_empty_at_address(kernel_page_table_address) };
     // 1:1 mapping
     let mapping = PhysicalOffset::new(0);
     let mut page_table = OffsetPageTable::new(kernel_page_table, mapping);
@@ -371,12 +397,13 @@ fn start(info: &BiosInfo) -> ! {
 
     // todo: detect RSDP (Root System Description Pointer)
     println!(
-        "Switching to kernel entry point at {:#x}",
-        kernel_entry_point.as_u64()
+        "Switching to kernel entry point at {:#x}, kernel page table at address: {:#x}",
+        kernel_entry_point.as_u64(),
+        kernel_page_table_frame.start()
     );
 
     context_switch(
-        kernel_page_table_address.as_u64(),
+        kernel_page_table_frame.start(),
         stack_top.as_u64(),
         kernel_entry_point.as_u64(),
         boot_info_address.as_u64(),

@@ -17,12 +17,23 @@
 
 ## Todos
 
+**Logging**
++ add proper logging
+
+**Memory regions**
++ better differentiate between BIOS firmware memory regions, bootloaders ones, kernel ones...
+
+**Physical and Virtual address**
++ make start() return a u64 and .address() the respective address type
++ need a clear convention what happens when you add 1 to a virtual and physical address
+    + +1 to frame / page should increase by 1 page or frame
+    + +1 to physical address / virtual address should increase the address by one
+
 **Println**
 + use a different println in kernel and tests than the one exported by x86_64 crate. Defining it there is just a dirty hack to get println debugging working for this code
 
 + use reserved physicalmemory region type only for regions used by BIOS. Else use sth like allocated
 
 + write a logger that can be enabled per module, similar to RIOTS DEBUG macro
-
 
 + implement the MapperFlush functionality also in bootloader, to be forced to flush tlb later

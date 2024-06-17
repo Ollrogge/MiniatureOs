@@ -4,7 +4,6 @@ use api::FramebufferInfo;
 use core::{arch::asm, mem::size_of};
 use x86_64::memory::{MemoryRegion, PhysicalMemoryRegion, PhysicalMemoryRegionType};
 
-pub mod bump_frame_allocator;
 pub mod mbr;
 pub mod realmode;
 

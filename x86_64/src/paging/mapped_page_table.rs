@@ -3,10 +3,12 @@ use crate::{
         Address, FrameAllocator, Page, PageSize, PhysicalFrame, Size2MiB, Size4KiB, VirtualAddress,
     },
     paging::{
-        Mapper, MappingError, PageTable, PageTableEntry, PageTableEntryFlags, TranslationError,
-        Translator,
+        Mapper, MappingError, PageTable, PageTableEntry, PageTableEntryFlags, TlbFlusher,
+        TranslationError, Translator,
     },
+    println,
 };
+use core::ops::Add;
 /// Provides a virtual address mapping for physical page table frames.
 ///
 /// This only works if the physical address space is somehow mapped to the virtual
@@ -44,9 +46,6 @@ impl<P: PageTableFrameMapping> PageTableWalker<P> {
         }
     }
     /// Allocates pagetable or returns it if already existing
-    // assumes 1:1 mapping for physical frames holding pagetable data
-    // using virtual addresses here because we are in long mode and all memory accesses
-    // are based on virtual memory. So just to make it explicit
     pub fn get_or_allocate_pagetable<'a, A>(
         &self,
         pagetable_entry: &'a mut PageTableEntry,
@@ -58,11 +57,11 @@ impl<P: PageTableFrameMapping> PageTableWalker<P> {
     {
         let table = if pagetable_entry.is_unused() {
             let frame = allocator.allocate_frame()?;
-            pagetable_entry.set_address(frame.start(), flags);
+            pagetable_entry.set_address(frame.address(), flags);
 
             let virtual_address = self.page_table_frame_mapping.frame_to_virtual(frame);
 
-            let table = PageTable::initialize_empty_at_address(virtual_address);
+            let table = unsafe { PageTable::initialize_empty_at_address(virtual_address) };
             table
         } else {
             if !flags.is_empty() && !pagetable_entry.flags().contains(flags) {
@@ -73,7 +72,7 @@ impl<P: PageTableFrameMapping> PageTableWalker<P> {
                 .page_table_frame_mapping
                 .frame_to_virtual(pagetable_entry.physical_frame());
 
-            PageTable::at_address(virtual_address)
+            unsafe { PageTable::at_address(virtual_address) }
         };
 
         Some(table)
@@ -81,9 +80,10 @@ impl<P: PageTableFrameMapping> PageTableWalker<P> {
 
     pub fn get_pagetable<'a>(&self, pagetable_entry: &'a PageTableEntry) -> Option<&'a PageTable> {
         if !pagetable_entry.is_unused() {
-            let virtual_address =
-                VirtualAddress::new(pagetable_entry.physical_frame().start().as_u64());
-            Some(PageTable::at_address(virtual_address))
+            let virtual_address = self
+                .page_table_frame_mapping
+                .frame_to_virtual(pagetable_entry.physical_frame());
+            Some(unsafe { PageTable::at_address(virtual_address) })
         } else {
             None
         }
@@ -97,7 +97,7 @@ impl<'a, P: PageTableFrameMapping> Mapper<Size4KiB> for MappedPageTable<'a, P> {
         page: Page<Size4KiB>,
         flags: PageTableEntryFlags,
         frame_allocator: &mut A,
-    ) -> Result<(), MappingError>
+    ) -> Result<TlbFlusher<Size4KiB>, MappingError>
     where
         A: FrameAllocator<Size4KiB>,
     {
@@ -135,8 +135,8 @@ impl<'a, P: PageTableFrameMapping> Mapper<Size4KiB> for MappedPageTable<'a, P> {
         if pte.is_present() {
             Err(MappingError::PageAlreadyMapped)
         } else {
-            pte.set_address(frame.start(), flags);
-            Ok(())
+            pte.set_address(frame.address(), flags);
+            Ok(TlbFlusher::new(page))
         }
     }
 }
@@ -148,14 +148,13 @@ impl<'a, P: PageTableFrameMapping> Mapper<Size2MiB> for MappedPageTable<'a, P> {
         page: Page<Size2MiB>,
         flags: PageTableEntryFlags,
         frame_allocator: &mut A,
-    ) -> Result<(), MappingError>
+    ) -> Result<TlbFlusher<Size2MiB>, MappingError>
     where
         A: FrameAllocator<Size4KiB>,
     {
         let parent_flags = PageTableEntryFlags::PRESENT
             | PageTableEntryFlags::WRITABLE
-            | PageTableEntryFlags::USER_ACCESSIBLE
-            | PageTableEntryFlags::HUGE_PAGE;
+            | PageTableEntryFlags::USER_ACCESSIBLE;
         let l4 = &mut self.pml4t;
         let l3 = self
             .walker
@@ -179,8 +178,8 @@ impl<'a, P: PageTableFrameMapping> Mapper<Size2MiB> for MappedPageTable<'a, P> {
         if pte.is_present() {
             Err(MappingError::PageAlreadyMapped)
         } else {
-            pte.set_address(frame.start(), flags);
-            Ok(())
+            pte.set_address(frame.address(), flags | PageTableEntryFlags::HUGE_PAGE);
+            Ok(TlbFlusher::new(page))
         }
     }
 }

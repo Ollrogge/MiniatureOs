@@ -1,4 +1,6 @@
 #![no_std]
+#![feature(hint_must_use)]
+#![feature(naked_functions)]
 pub mod gdt;
 pub mod idt;
 pub mod instructions;

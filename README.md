@@ -10,6 +10,7 @@ Miniature hobby bootloader & POSIX-compatible kernel to teach me the basic conce
 
 ### Features
 - [X] BIOS bootloader
+- [X] Heap
 
 ### Goals
 Following are the long-term goals of this project:

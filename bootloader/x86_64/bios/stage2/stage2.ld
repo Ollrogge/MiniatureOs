@@ -30,6 +30,7 @@ SECTIONS {
 
     _second_stage_end = .;
 
+    /* limit to 512kB boundary because follow region is probably reserved ? */
     . = 0x0007FFFF - 2;
     .end_marker :
     {

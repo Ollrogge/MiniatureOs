@@ -1,10 +1,20 @@
+//! This module implements a buddy frame allocator
+//!
 extern crate alloc;
-use alloc::collections::BTreeSet;
-use core::{array, cmp::min, mem::MaybeUninit, ops::DerefMut, ptr::NonNull, u64::MAX};
+use super::Locked;
+use alloc::{
+    alloc::{GlobalAlloc, Layout},
+    borrow::ToOwned,
+};
+use core::{
+    cmp::{max, min},
+    mem::MaybeUninit,
+    ptr::NonNull,
+};
 use x86_64::{
     memory::{
-        FrameAllocator, MemoryRegion, PageSize, PhysicalAddress, PhysicalFrame,
-        PhysicalMemoryRegion, PhysicalMemoryRegionType, Size2MiB, Size4KiB,
+        Address, FrameAllocator, MemoryRegion, PageSize, PhysicalAddress, PhysicalFrame,
+        PhysicalMemoryRegion, PhysicalMemoryRegionType, Region, Size2MiB, Size4KiB, VirtualAddress,
     },
     println,
 };
@@ -37,25 +47,48 @@ fn previous_power_of_two(num: u64) -> u64 {
 }
 
 trait LinkedListTrait {
-    fn pop_front(&mut self) -> Option<&mut Node>;
-    fn remove(&mut self, region_start: PhysicalMemoryRegion) -> Option<&mut Node>;
-    fn front(&self) -> Option<&Node>;
+    fn pop_front(&mut self) -> Option<NonNull<Chunk>>;
+    fn remove(&mut self, start: u64) -> Option<NonNull<Chunk>>;
+    fn front(&self) -> Option<NonNull<Chunk>>;
     fn is_empty(&self) -> bool;
-    fn front_mut(&mut self) -> Option<&mut Node>;
 }
 
-// The value of the Node cant be generic since then the LinkedListWithStorage wont work
-// as it requires an array which size must be known at compile time
 #[derive(Clone, Copy)]
-struct Node {
-    next: Option<NonNull<Node>>,
-    region: PhysicalMemoryRegion,
+pub struct Chunk {
+    next: Option<NonNull<Chunk>>,
+    size: u64,
 }
 
-impl Node {
+unsafe impl Send for Chunk {}
+
+impl Chunk {
     pub fn reset(&mut self) {
         self.next = None;
-        self.region = PhysicalMemoryRegion::default();
+        self.size = 0;
+    }
+
+    pub fn new(next: Option<NonNull<Chunk>>, size: u64) -> Self {
+        Self { next, size }
+    }
+
+    pub unsafe fn new_at_address(address: VirtualAddress, size: u64) -> &'static mut Chunk {
+        let node: &'static mut Chunk = &mut *address.as_mut_ptr();
+        node.size = size;
+        node.next = None;
+
+        node
+    }
+
+    pub fn size(&self) -> u64 {
+        self.size
+    }
+
+    pub fn start(&self) -> u64 {
+        self as *const Self as u64
+    }
+
+    pub fn address(&self) -> VirtualAddress {
+        VirtualAddress::new(self.start())
     }
 }
 
@@ -63,13 +96,13 @@ impl Node {
 struct LinkedListWithStorage {
     // You can think of MaybeUninit<T> as being a bit like Option<T>
     // but without any of the run-time tracking and without any of the safety checks.
-    pub nodes: [MaybeUninit<Node>; LIST_SIZE],
-    pub head: Option<NonNull<Node>>,
+    pub nodes: [MaybeUninit<Chunk>; LIST_SIZE],
+    pub head: Option<NonNull<Chunk>>,
 }
 
 impl LinkedListWithStorage {
     pub fn new() -> Self {
-        const UNINIT: MaybeUninit<Node> = MaybeUninit::uninit();
+        const UNINIT: MaybeUninit<Chunk> = MaybeUninit::uninit();
 
         let mut list = Self {
             nodes: [UNINIT; LIST_SIZE],
@@ -77,7 +110,7 @@ impl LinkedListWithStorage {
         };
 
         for node in &mut list.nodes {
-            let node_ptr: *mut Node = node.as_mut_ptr();
+            let node_ptr: *mut Chunk = node.as_mut_ptr();
             let node_ref = unsafe { &mut *node_ptr };
 
             node_ref.next = list.head;
@@ -87,7 +120,7 @@ impl LinkedListWithStorage {
         list
     }
 
-    fn push_front(&mut self, block: *mut Node) {
+    fn push_front(&mut self, block: *mut Chunk) {
         unsafe {
             (*block).next = self.head;
         }
@@ -96,16 +129,16 @@ impl LinkedListWithStorage {
 }
 
 impl LinkedListTrait for LinkedListWithStorage {
-    fn pop_front(&mut self) -> Option<&mut Node> {
+    fn pop_front(&mut self) -> Option<NonNull<Chunk>> {
         if let Some(mut block) = self.head.take() {
             self.head = unsafe { block.as_mut().next.take() };
-            Some(unsafe { block.as_mut() })
+            Some(block)
         } else {
             None
         }
     }
 
-    fn remove(&mut self, _: PhysicalMemoryRegion) -> Option<&mut Node> {
+    fn remove(&mut self, _: u64) -> Option<NonNull<Chunk>> {
         None
     }
 
@@ -113,16 +146,8 @@ impl LinkedListTrait for LinkedListWithStorage {
         self.head.is_none()
     }
 
-    fn front(&self) -> Option<&Node> {
-        self.head
-            .as_ref()
-            .map(|non_null| unsafe { non_null.as_ref() })
-    }
-
-    fn front_mut(&mut self) -> Option<&mut Node> {
-        self.head
-            .as_mut()
-            .map(|non_null| unsafe { non_null.as_mut() })
+    fn front(&self) -> Option<NonNull<Chunk>> {
+        self.head.as_ref().map(|non_null| non_null.clone())
     }
 }
 
@@ -130,27 +155,29 @@ impl LinkedListTrait for LinkedListWithStorage {
 struct LinkedList {
     // You can think of MaybeUninit<T> as being a bit like Option<T>
     // but without any of the run-time tracking and without any of the safety checks.
-    pub head: Option<NonNull<Node>>,
+    pub head: Option<NonNull<Chunk>>,
 }
 
+unsafe impl Send for LinkedList {}
+
 impl LinkedList {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self { head: None }
     }
 
     /// Add a node to the list.
     /// O(1) runtime
-    fn push_front(&mut self, block: &mut Node) {
+    fn push_front(&mut self, block: &mut Chunk) {
         block.next = self.head;
         self.head = Some(NonNull::new(block).unwrap());
     }
 }
 
 impl LinkedListTrait for LinkedList {
-    fn pop_front(&mut self) -> Option<&mut Node> {
+    fn pop_front(&mut self) -> Option<NonNull<Chunk>> {
         if let Some(mut block) = self.head.take() {
             self.head = unsafe { block.as_mut().next.take() };
-            Some(unsafe { block.as_mut() })
+            Some(block)
         } else {
             None
         }
@@ -160,60 +187,49 @@ impl LinkedListTrait for LinkedList {
         self.head.is_none()
     }
 
-    fn front(&self) -> Option<&Node> {
-        self.head
-            .as_ref()
-            .map(|non_null| unsafe { non_null.as_ref() })
+    fn front(&self) -> Option<NonNull<Chunk>> {
+        self.head.as_ref().map(|non_null| non_null.clone())
     }
-
-    fn front_mut(&mut self) -> Option<&mut Node> {
-        self.head
-            .as_mut()
-            .map(|non_null| unsafe { non_null.as_mut() })
-    }
-
-    /// Remove a region from the list.
+    /// Remove node starting at start from list.
     /// takes O(n) time
-    fn remove(&mut self, region: PhysicalMemoryRegion) -> Option<&mut Node> {
-        let mut last_node: Option<*mut Node> = None;
-        let mut cur_node = self.front_mut().map(|node| node as *mut Node);
+    fn remove(&mut self, start: u64) -> Option<NonNull<Chunk>> {
+        let mut last_chunk: Option<NonNull<Chunk>> = None;
+        let mut cur_chunk = self.front();
 
-        while let Some(node_ptr) = cur_node {
-            let node = unsafe { &mut *node_ptr };
-            if node.region.start() == region.start() {
+        while let Some(mut node_ptr) = cur_chunk {
+            let node = unsafe { node_ptr.as_mut() };
+            if node.start() == start {
                 // If the node to be removed is found, update the links
-                match last_node {
-                    Some(last_node_ptr) => unsafe { (*last_node_ptr).next = node.next },
+                match last_chunk {
+                    Some(mut last_node_ptr) => unsafe { last_node_ptr.as_mut().next = node.next },
                     None => self.head = node.next,
                 }
 
                 // Return the mutable reference to the removed node
-                return Some(node);
+                return Some(node_ptr);
             }
 
             // Move to the next node
-            last_node = cur_node;
-            cur_node = node.next.as_mut().map(|non_null| non_null.as_ptr());
+            last_chunk = cur_chunk;
+            cur_chunk = node.next;
         }
 
         None
     }
 }
 
-pub struct BuddyFrameAllocator {
+pub struct BuddyAllocator {
     buddies: [LinkedList; MAX_ORDER],
-    node_pool: LinkedListWithStorage,
 }
 
-impl<'a> BuddyFrameAllocator {
-    pub fn new() -> Self {
+impl<'a> BuddyAllocator {
+    pub const fn new() -> Self {
         Self {
             buddies: [LinkedList::new(); MAX_ORDER],
-            node_pool: LinkedListWithStorage::new(),
         }
     }
 
-    pub fn init<I>(&mut self, memory_map: I)
+    pub fn init_from_memory_map<I>(&mut self, memory_map: I)
     where
         I: Iterator<Item = PhysicalMemoryRegion>,
     {
@@ -222,17 +238,22 @@ impl<'a> BuddyFrameAllocator {
                 continue;
             }
 
-            let start = region.start();
-            let end = region.end() - 1;
+            let start = VirtualAddress::new(region.start());
+            let end = VirtualAddress::new(region.end() - 1);
 
-            self.add_frame(start, end);
+            self.add_region(start, end);
         }
     }
 
-    pub fn add_frame(&mut self, start: u64, end: u64) {
+    pub fn init(&mut self, start: VirtualAddress, size: usize) {
+        self.add_region(start, start + size);
+    }
+
+    pub fn add_region(&mut self, start: VirtualAddress, end: VirtualAddress) {
         assert!(start <= end);
 
-        let mut current_start = start;
+        let mut current_start = start.as_u64();
+        let end = end.as_u64();
 
         while current_start < end {
             // align blocks based on their start address
@@ -247,41 +268,33 @@ impl<'a> BuddyFrameAllocator {
                 1 << (MAX_ORDER - 1),
             );
 
-            let node = self
-                .node_pool
-                .pop_front()
-                .expect("Buddy allocator memory pool exhausted");
-
-            // size not needed due to buddy array but lets make it explicit
-            node.region.set_size(size);
-            node.region.set_start(current_start);
+            let chunk = unsafe { Chunk::new_at_address(VirtualAddress::new(current_start), size) };
 
             // 0b100 => 2 trailing zeros
-            self.buddies[size.trailing_zeros() as usize].push_front(node);
+            self.buddies[size.trailing_zeros() as usize].push_front(chunk);
             current_start += size;
         }
     }
 
-    pub fn alloc(&mut self, size: u64) -> Option<PhysicalMemoryRegion> {
-        let size = size.next_power_of_two();
-        match self.alloc_power_of_two(size) {
-            // give back node to pool
-            Some(node) => {
-                let region = node.region;
-
-                node.reset();
-
-                let node_ptr = node as *mut Node;
-                self.node_pool.push_front(node_ptr);
-
-                Some(region)
-            }
-            None => None,
-        }
+    const fn min_size() -> usize {
+        size_of::<Chunk>()
     }
 
-    /// Alloc power of two sized frame. The frame will have alignment equal to the size
-    fn alloc_power_of_two(&mut self, size: u64) -> Option<&mut Node> {
+    // Make sure region is big enough to hold at least the chunk metadata,
+    // and big enough to have the alignment required by the layout
+    // Due to the way the buddy allocator works, chunk >= layout.align() will
+    // be properly aligned
+    fn align_layout_size(layout: Layout) -> usize {
+        max(
+            layout.size().next_power_of_two(),
+            max(layout.align(), Self::min_size()),
+        )
+    }
+
+    /// Alloc a power of two sized range of memory satisfying the layout requirement
+    pub unsafe fn alloc(&mut self, layout: Layout) -> Option<NonNull<Chunk>> {
+        let size = Self::align_layout_size(layout);
+
         let class = size.trailing_zeros() as usize;
         // Find first non-empty size class
         for i in class..self.buddies.len() {
@@ -293,24 +306,21 @@ impl<'a> BuddyFrameAllocator {
             // traverse through multiple size layers if needed
             // Only needed when i > class
             for j in (class + 1..i + 1).rev() {
-                if let Some(node) = self.buddies[j].pop_front() {
+                if let Some(mut chunk_ptr) = self.buddies[j].pop_front() {
                     // create two buddies of size class n -1 from 1 chunk of size
                     // class n
-                    let node = node.clone();
-                    let region = &node.region;
+                    let chunk = chunk_ptr.as_mut();
 
-                    let split_node1 = self.node_pool.pop_front().expect("node pool exhausted");
-
-                    split_node1.region.set_start(region.start());
-                    split_node1.region.set_size(1 << (j - 1));
+                    let sz = 1 << (j - 1);
+                    let addr = chunk.address();
+                    let split_node1 = unsafe { Chunk::new_at_address(addr, sz) };
 
                     self.buddies[j - 1].push_front(split_node1);
 
-                    let split_node2 = self.node_pool.pop_front().expect("node pool exhausted");
-                    split_node2
-                        .region
-                        .set_start(region.start() + (1 << (j - 1)));
-                    split_node2.region.set_size(1 << (j - 1));
+                    let sz = 1 << (j - 1);
+                    let addr = chunk.address() + sz;
+
+                    let split_node2 = unsafe { Chunk::new_at_address(addr, sz) };
 
                     /*
                     println!(
@@ -331,15 +341,10 @@ impl<'a> BuddyFrameAllocator {
         self.buddies[class].pop_front()
     }
 
-    pub fn dealloc(&mut self, region: PhysicalMemoryRegion) {
-        assert!(region.size() % 2 == 0);
-        self.dealloc_power_of_two(region);
-    }
-
-    fn dealloc_power_of_two(&mut self, region: PhysicalMemoryRegion) {
-        let mut current_class = region.size().trailing_zeros() as usize;
-
-        let mut region = region;
+    pub fn dealloc(&mut self, chunk: NonNull<Chunk>) {
+        let chunk = unsafe { chunk.as_ref() };
+        let mut current_class = chunk.size().trailing_zeros() as usize;
+        let mut region = Region::new(chunk.start(), chunk.size());
 
         // keep merging buddies and moving 1 size class up until not possible anymore
         while current_class < self.buddies.len() {
@@ -348,23 +353,21 @@ impl<'a> BuddyFrameAllocator {
             // therefore we can get buddy address by simply toggling the size bit
             buddy.set_start(region.start() ^ (1 << current_class));
             // TODO: removing a buddy is O(N). Could be sped up by using e.g. a B-Tree
-            match self.buddies[current_class].remove(buddy) {
-                Some(buddy_node) => {
+            match self.buddies[current_class].remove(buddy.start()) {
+                Some(_) => {
                     // adjust region for higher size class
                     region.set_start(min(region.start(), buddy.start()));
                     region.set_size(region.size() * 2);
 
-                    // give back node to pool
-                    let node_ptr = buddy_node as *mut Node;
-                    self.node_pool.push_front(node_ptr);
-
                     current_class += 1;
                 }
                 None => {
-                    let node = self.node_pool.pop_front().expect("Node pool exhausted");
-                    node.region = region;
+                    let addr = VirtualAddress::new(region.start());
+                    let sz = region.size();
 
-                    self.buddies[current_class].push_front(node);
+                    let chunk = unsafe { Chunk::new_at_address(addr, sz) };
+
+                    self.buddies[current_class].push_front(chunk);
                     break;
                 }
             }
@@ -372,20 +375,19 @@ impl<'a> BuddyFrameAllocator {
     }
 }
 
-unsafe impl FrameAllocator<Size4KiB> for BuddyFrameAllocator {
-    fn allocate_frame(&mut self) -> Option<PhysicalFrame<Size4KiB>> {
-        let region = self.alloc(Size4KiB::SIZE)?;
-        let frame = PhysicalFrame::containing_address(PhysicalAddress::new(region.start()));
-
-        Some(frame)
+unsafe impl GlobalAlloc for Locked<BuddyAllocator> {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        let mut allocator = self.lock();
+        match allocator.alloc(layout) {
+            Some(chunk) => chunk.as_ptr() as *mut u8,
+            None => panic!("Allocator ran out of memory"),
+        }
     }
-}
 
-unsafe impl FrameAllocator<Size2MiB> for BuddyFrameAllocator {
-    fn allocate_frame(&mut self) -> Option<PhysicalFrame<Size2MiB>> {
-        let region = self.alloc(Size2MiB::SIZE)?;
-        let frame = PhysicalFrame::containing_address(PhysicalAddress::new(region.start()));
-
-        Some(frame)
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        let mut allocator = self.lock();
+        let size = BuddyAllocator::align_layout_size(layout);
+        let chunk = Chunk::new_at_address(VirtualAddress::from_raw_ptr(ptr), size as u64);
+        allocator.dealloc(NonNull::new(chunk as *mut Chunk).unwrap())
     }
 }

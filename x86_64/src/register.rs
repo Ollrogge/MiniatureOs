@@ -258,11 +258,11 @@ impl Cr3 {
 
     /// Reads the raw EFER register.
     pub fn read_raw() -> u64 {
-        let mut cr0: usize;
+        let mut cr3: usize;
         unsafe {
-            asm!("mov {}, cr0", out(reg) cr0, options(nomem, nostack, preserves_flags));
+            asm!("mov {}, cr3", out(reg) cr3, options(nomem, nostack, preserves_flags));
         }
-        cr0 as u64
+        cr3 as u64
     }
 
     /// Read pml4t address and CR3 flags
@@ -283,7 +283,7 @@ impl Cr3 {
     /// Unsafe because it’s possible to break memory safety with wrong flags,
     /// e.g. by disabling paging
     pub unsafe fn write(frame: PhysicalFrame, val: Cr3Flags) {
-        unsafe { Self::write_raw(frame.start().as_u64() | val.bits()) }
+        unsafe { Self::write_raw(frame.start() | val.bits()) }
     }
 
     /// Writes a raw value to the CR0 register

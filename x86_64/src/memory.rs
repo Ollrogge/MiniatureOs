@@ -44,6 +44,36 @@ impl Region {
     }
 }
 
+impl MemoryRegion for Region {
+    fn start(&self) -> u64 {
+        self.start
+    }
+
+    fn end(&self) -> u64 {
+        self.start + self.size
+    }
+
+    fn size(&self) -> u64 {
+        self.size
+    }
+
+    fn contains(&self, address: u64) -> bool {
+        self.start() <= address && address <= self.end()
+    }
+
+    fn is_usable(&self) -> bool {
+        true
+    }
+
+    fn set_start(&mut self, start: u64) {
+        self.start = start
+    }
+
+    fn set_size(&mut self, size: u64) {
+        self.size = size
+    }
+}
+
 #[allow(dead_code)]
 #[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
@@ -72,6 +102,10 @@ pub struct PhysicalMemoryRegion {
 impl PhysicalMemoryRegion {
     pub fn new(start: u64, size: u64, typ: PhysicalMemoryRegionType) -> Self {
         Self { start, size, typ }
+    }
+
+    pub fn address(&self) -> PhysicalAddress {
+        PhysicalAddress(self.start)
     }
 }
 
@@ -226,7 +260,7 @@ impl LowerHex for PhysicalAddress {
 pub struct VirtualAddress(u64);
 
 impl VirtualAddress {
-    pub fn new(address: u64) -> Self {
+    pub const fn new(address: u64) -> Self {
         Self(address)
     }
 
@@ -246,6 +280,16 @@ impl VirtualAddress {
 
     pub fn from_ptr<T>(ptr: &T) -> Self {
         let addr = ptr as *const _ as u64;
+        VirtualAddress(addr)
+    }
+
+    pub fn from_raw_ptr<T>(ptr: *const T) -> Self {
+        let addr = ptr as u64;
+        VirtualAddress(addr)
+    }
+
+    pub fn from_raw_mut_ptr<T>(ptr: *mut T) -> Self {
+        let addr = ptr as u64;
         VirtualAddress(addr)
     }
 
@@ -359,10 +403,14 @@ impl<S: PageSize> PhysicalFrame<S> {
     }
 
     pub fn end(&self) -> u64 {
-        self.start().as_u64() + self.size() as u64
+        self.start() + self.size() as u64
     }
 
-    pub fn start(&self) -> PhysicalAddress {
+    pub fn start(&self) -> u64 {
+        self.address.as_u64()
+    }
+
+    pub fn address(&self) -> PhysicalAddress {
         self.address
     }
 
@@ -476,6 +524,10 @@ impl<S: PageSize> Page<S> {
     }
 
     pub fn start(self) -> VirtualAddress {
+        self.address
+    }
+
+    pub fn address(self) -> VirtualAddress {
         self.address
     }
 }

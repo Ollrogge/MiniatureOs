@@ -1,3 +1,4 @@
+use super::TlbFlusher;
 use crate::{
     memory::{Address, PhysicalFrame, Size2MiB, Size4KiB, VirtualAddress},
     paging::{
@@ -19,10 +20,13 @@ impl PhysicalOffset {
 
 unsafe impl PageTableFrameMapping for PhysicalOffset {
     fn frame_to_virtual(&self, frame: PhysicalFrame) -> VirtualAddress {
-        VirtualAddress::new(self.offset + frame.start().as_u64())
+        VirtualAddress::new(self.offset + frame.address().as_u64())
     }
 }
 
+/// Pagetable that requires the complete physical memory space to be mapped at
+/// some offset in the virtual address space.
+/// Needed such that one can access the page tables using virtual addresses.
 pub struct OffsetPageTable<'a, P: PageTableFrameMapping> {
     inner: MappedPageTable<'a, P>,
 }
@@ -41,7 +45,7 @@ impl<'a, P: PageTableFrameMapping> Mapper<Size4KiB> for OffsetPageTable<'a, P> {
         page: Page<Size4KiB>,
         flags: PageTableEntryFlags,
         frame_allocator: &mut A,
-    ) -> Result<(), MappingError>
+    ) -> Result<TlbFlusher<Size4KiB>, MappingError>
     where
         A: FrameAllocator<Size4KiB>,
     {
@@ -56,7 +60,7 @@ impl<'a, P: PageTableFrameMapping> Mapper<Size2MiB> for OffsetPageTable<'a, P> {
         page: Page<Size2MiB>,
         flags: PageTableEntryFlags,
         frame_allocator: &mut A,
-    ) -> Result<(), MappingError>
+    ) -> Result<TlbFlusher<Size2MiB>, MappingError>
     where
         A: FrameAllocator<Size4KiB>,
     {

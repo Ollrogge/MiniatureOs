@@ -24,6 +24,8 @@ pub struct KernelLoader<'a, M, A> {
     frame_allocator: &'a mut A,
 }
 
+/// Kernel binary was loaded into memory by stage2, here we just handle relocations
+/// and special sections such as bss
 impl<'a, M, A> KernelLoader<'a, M, A>
 where
     M: MapperAllSizes + TranslatorAllSizes,
@@ -162,12 +164,13 @@ where
             // Cant get around the loading binary blob into memory thing for now ig,
             // since we only have access to BIOS disk firmware in lower stages
 
-            // Map data into memory
+            // Map section into memory
             if header.file_size() > 0 {
                 for frame in PhysicalFrame::range_inclusive(start_frame, end_frame) {
-                    let offset = frame - start_frame;
+                    let frame_offset = frame - start_frame;
                     // 1:1 mapping
-                    let page = start_page + offset;
+                    let page = start_page + frame_offset;
+
                     /*
                     println!(
                         "Map: {:x} -> {:x}",
@@ -175,9 +178,11 @@ where
                         page.address.as_u64()
                     );
                     */
+
                     self.page_table
                         .map_to(frame, page, flags, self.frame_allocator)
-                        .expect("Failed to map section");
+                        .expect("Failed to map section")
+                        .ignore();
                 }
             } else if header.file_size() == 0 && header.mem_size() > 0 {
                 // .bss section handling
@@ -192,13 +197,16 @@ where
                     let slice = unsafe {
                         slice::from_raw_parts_mut(virtual_address.as_u64() as *mut u8, frame.size())
                     };
+
+                    // null page
                     for e in slice.iter_mut() {
                         *e = 0;
                     }
 
                     self.page_table
                         .map_to(frame, page, flags, self.frame_allocator)
-                        .expect("Failed to map .bss section");
+                        .expect("Failed to map .bss section")
+                        .ignore();
                 }
             } else if header.mem_size() > 0 && header.file_size() > 0 {
                 // .bss that is partially included in ELF (has an actual size) ?

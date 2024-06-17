@@ -1,15 +1,25 @@
 #![no_std]
 #![no_main]
 #![feature(naked_functions)]
+#![feature(const_mut_refs)]
 use api::{BootInfo, PhysicalMemoryRegions};
-use core::{arch::asm, panic::PanicInfo};
-use kernel::{kernel_init, memory::buddy_frame_allocator::BuddyFrameAllocator};
+use core::{alloc::Layout, arch::asm, mem::size_of, panic::PanicInfo};
+use kernel::{
+    allocator::{
+        buddy_allocator::BuddyAllocator, init_heap, Locked, ALLOCATOR, HEAP_SIZE, HEAP_START,
+    },
+    kernel_init,
+};
 use x86_64::{
     instructions::int3,
     memory::{MemoryRegion, PhysicalMemoryRegion},
+    mutex::MutexGuard,
     println,
     register::Cr0,
 };
+
+extern crate alloc;
+use alloc::{boxed::Box, vec::Vec};
 
 #[panic_handler]
 pub fn panic(info: &PanicInfo) -> ! {
@@ -64,70 +74,82 @@ fn trigger_page_fault() {
 }
 
 // TODO: put this into the test_kernel
-// TODO: write proper tests
-fn test_buddy_allocator(allocator: &mut BuddyFrameAllocator) {
-    // alloc some chunks to make sure we have buddies
-    // (as there might be single 0x100 chunks at the beginning)
-    let mut last_start = allocator.alloc(0x100).unwrap().start();
-    loop {
-        let c = allocator.alloc(0x100).unwrap();
+unsafe fn test_buddy_allocator() {
+    let mut allocator = ALLOCATOR.lock();
+    let layout_x100 = Layout::from_size_align(0x100, size_of::<usize>()).unwrap();
+    let layout_x200 = Layout::from_size_align(0x200, size_of::<usize>()).unwrap();
+    let layout_x400 = Layout::from_size_align(0x400, size_of::<usize>()).unwrap();
 
-        // the higher buddy is returned first
-        if c.start() + 0x100 == last_start {
-            break;
-        }
-
-        println!("Test: {:#x} {:#x}", c.start(), last_start);
-
-        last_start = c.start();
-    }
     // Test easy merge
-    let c1 = allocator.alloc(0x100).unwrap();
-    let c2 = allocator.alloc(0x100).unwrap();
+    let c1 = allocator.alloc(layout_x100).unwrap();
+    let c2 = allocator.alloc(layout_x100).unwrap();
 
-    let addr = u64::min(c1.start(), c2.start());
+    let addr = u64::min(c1.as_ref().start(), c2.as_ref().start());
 
+    // c1 and c2 should be merged into 1 0x200 sized chunk
     allocator.dealloc(c1);
     allocator.dealloc(c2);
 
-    let c3 = allocator.alloc(0x200).unwrap();
-    println!(
-        "Test: c3: {:#x} addr:{:#x}, buddies ?: c1:{:#x} c2:{:#x}",
-        c3.start(),
-        addr,
-        c1.start(),
-        c2.start()
-    );
+    let c3 = allocator.alloc(layout_x200).unwrap();
+    assert!(c3.as_ref().start() == addr);
 
-    assert!(c3.start() == addr);
-
-    let addr = c3.start();
+    let addr = c3.as_ref().start();
     allocator.dealloc(c3);
 
     // Test multistage merge
 
     // c1 and c2 should be created from the c3 we just deallocated
-    let c1 = allocator.alloc(0x100).unwrap();
-    let c2 = allocator.alloc(0x100).unwrap();
+    let c1 = allocator.alloc(layout_x100).unwrap();
+    let c2 = allocator.alloc(layout_x100).unwrap();
 
-    assert!(u64::min(c1.start(), c2.start()) == addr);
+    assert!(u64::min(c1.as_ref().start(), c2.as_ref().start()) == addr);
 
-    let c3 = allocator.alloc(0x200).unwrap();
-    let addr = u64::min(c3.start(), u64::min(c1.start(), c2.start()));
-
+    let c3 = allocator.alloc(layout_x200).unwrap();
+    println!(
+        "C3 address: {:#x}, min address before: {:#x}",
+        c3.as_ref().start(),
+        addr
+    );
+    let addr = u64::min(
+        c3.as_ref().start(),
+        u64::min(c1.as_ref().start(), c2.as_ref().start()),
+    );
     // merge 2* 0x100 into 0x200
     allocator.dealloc(c1);
     allocator.dealloc(c2);
-    // merge c3 with the 0x200 chunk created by deallocing c1 and c2
+    // free c3 causing it to be merged with the 0x200 chunk created by
+    // deallocating c1 and c2. Should create 1 0x400 sized chunk
     allocator.dealloc(c3);
 
-    let c4 = allocator.alloc(0x200).unwrap();
+    let c4 = allocator.alloc(layout_x400).unwrap();
 
-    println!("Test: {:#x} {:#x}", c4.start(), addr);
+    assert!(c4.as_ref().start() == addr);
+    assert!(c4.as_ref().start() == addr);
 
-    assert!(c4.start() == addr);
+    allocator.dealloc(c4);
 
     println!("Testing buddy allocator done");
+}
+
+fn test_heap_allocations() {
+    {
+        let heap_value_1 = Box::new(41);
+        let heap_value_2 = Box::new(13);
+        assert_eq!(*heap_value_1, 41);
+        assert_eq!(*heap_value_2, 13);
+
+        let n = 1000;
+        let mut vec = Vec::new();
+        for i in 0..n {
+            vec.push(i);
+        }
+        assert_eq!(vec.iter().sum::<u64>(), (n - 1) * n / 2);
+    }
+
+    for i in 0..HEAP_SIZE {
+        let x = Box::new(i);
+        assert_eq!(*x, i);
+    }
 }
 
 fn start(info: &'static BootInfo) -> ! {
@@ -135,15 +157,15 @@ fn start(info: &'static BootInfo) -> ! {
 
     print_memory_map(&info.memory_regions);
 
-    kernel_init(info).unwrap();
+    let (frame_allocator, page_table) =
+        kernel_init(info).expect("Error while trying to initialize kernel");
+    println!("Kernel initialized");
 
-    println!("Interrupts initialized");
+    unsafe { test_buddy_allocator() };
+    println!("Buddy allocator tested");
 
-    let mut allocator = BuddyFrameAllocator::new();
-    allocator.init(info.memory_regions.into_iter().cloned());
-    println!("Buddy allocator initialized");
-
-    test_buddy_allocator(&mut allocator);
+    test_heap_allocations();
+    println!("Heap tested");
 
     // invalid opcode
     /*

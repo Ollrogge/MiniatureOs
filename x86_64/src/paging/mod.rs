@@ -1,6 +1,9 @@
-use crate::memory::{
-    Address, FrameAllocator, Page, PageSize, PhysicalAddress, PhysicalFrame, Size2MiB, Size4KiB,
-    VirtualAddress,
+use crate::{
+    instructions,
+    memory::{
+        Address, FrameAllocator, Page, PageSize, PhysicalAddress, PhysicalFrame, Size2MiB,
+        Size4KiB, VirtualAddress,
+    },
 };
 use bit_field::BitField;
 use bitflags::bitflags;
@@ -11,6 +14,7 @@ use core::{
     slice,
 };
 
+pub mod bump_frame_allocator;
 pub mod mapped_page_table;
 pub mod offset_page_table;
 
@@ -117,18 +121,16 @@ impl PageTable {
         self.entries.iter_mut()
     }
 
-    pub fn initialize_empty_at_address(address: VirtualAddress) -> &'static mut PageTable {
+    pub unsafe fn initialize_empty_at_address(address: VirtualAddress) -> &'static mut PageTable {
         assert!(
             address.as_u64() as usize % PageTable::SIZE == 0,
             "Address must be properly aligned"
         );
-        unsafe {
-            ptr::write(address.as_mut_ptr(), PageTable::empty());
-        }
-        unsafe { &mut *address.as_mut_ptr() }
+        ptr::write(address.as_mut_ptr(), PageTable::empty());
+        &mut *address.as_mut_ptr()
     }
 
-    pub fn at_address(address: VirtualAddress) -> &'static mut PageTable {
+    pub unsafe fn at_address(address: VirtualAddress) -> &'static mut PageTable {
         unsafe { &mut *address.as_mut_ptr() }
     }
 
@@ -166,7 +168,7 @@ pub trait Mapper<S: PageSize> {
         to: Page<S>,
         flags: PageTableEntryFlags,
         frame_allocator: &mut A,
-    ) -> Result<(), MappingError>
+    ) -> Result<TlbFlusher<S>, MappingError>
     where
         A: FrameAllocator<Size4KiB>;
 
@@ -175,7 +177,7 @@ pub trait Mapper<S: PageSize> {
         frame: PhysicalFrame<S>,
         flags: PageTableEntryFlags,
         frame_allocator: &mut A,
-    ) -> Result<(), MappingError>
+    ) -> Result<TlbFlusher<S>, MappingError>
     where
         A: FrameAllocator<Size4KiB>,
     {
@@ -200,4 +202,19 @@ impl<T> TranslatorAllSizes for T where T: Translator<Size4KiB> + Translator<Size
 /// Translates page to physical frame using page table
 pub trait Translator<S: PageSize> {
     fn translate(&self, page: Page<S>) -> Result<PhysicalFrame<S>, TranslationError>;
+}
+
+#[must_use = "Page table changes must be flushed or ignored"]
+pub struct TlbFlusher<S: PageSize>(Page<S>);
+
+impl<S: PageSize> TlbFlusher<S> {
+    pub fn new(page: Page<S>) -> Self {
+        TlbFlusher(page)
+    }
+
+    pub fn flush(self) {
+        instructions::flush_tlb(self.0.address())
+    }
+
+    pub fn ignore(self) {}
 }
