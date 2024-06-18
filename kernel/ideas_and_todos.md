@@ -15,6 +15,22 @@
     - requires OOM killer since processes were lied to and assume they have the memory already
 
 
+### Timer
++ Programmable Interval Timer (PIT)
+    + separate timer circuit
+        + can cause inefficiencies / timming issues in multiprocessor systems
+    + lower precision and frequency range
+    + good as a starter
+    + https://wiki.osdev.org/Programmable_Interval_Timer#Uses_for_the_Timer_IRQ
+
++ APIC timer
+    + local timer hardwired to each cpu core
+    + good for multiprocessor systems
+    + harder to implement since it oscillates at the individual CPU's frequencies
+    + higher precision
+    + better but harder to implement
+    + https://wiki.osdev.org/APIC_Timer
+
 ## Todos
 
 **Logging**
