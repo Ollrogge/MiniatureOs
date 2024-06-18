@@ -523,8 +523,8 @@ impl<S: PageSize> Page<S> {
         self.address + S::SIZE
     }
 
-    pub fn start(self) -> VirtualAddress {
-        self.address
+    pub fn start(self) -> u64 {
+        self.address.as_u64()
     }
 
     pub fn address(self) -> VirtualAddress {

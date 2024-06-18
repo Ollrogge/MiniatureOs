@@ -139,7 +139,7 @@ pub struct InterruptDescriptorTable {
     pub vmm_communication_exception: InterruptDescriptor,
     pub security_exception: InterruptDescriptor,
     reserved_3: InterruptDescriptor,
-    interrupts: [InterruptDescriptor; 256 - 32],
+    pub interrupts: [InterruptDescriptor; 256 - 32],
 }
 const_assert!(
     size_of::<InterruptDescriptorTable>() == 256 * 0x10,
@@ -162,6 +162,10 @@ impl InterruptDescriptorTable {
         unsafe {
             lidt(&desc);
         };
+    }
+
+    pub const fn interrups_offset() -> usize {
+        32
     }
 }
 

@@ -1,4 +1,4 @@
-use x86_64::uart::PortRegister;
+use x86_64::port::Port;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
 pub enum QemuExitCode {
@@ -8,7 +8,7 @@ pub enum QemuExitCode {
 
 pub fn exit(exit_code: QemuExitCode) -> ! {
     unsafe {
-        let port = PortRegister::new(0xf4);
+        let port = Port::new(0xf4);
         port.write(exit_code as u32);
     }
 

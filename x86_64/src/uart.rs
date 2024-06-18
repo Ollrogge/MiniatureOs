@@ -1,3 +1,4 @@
+use crate::port::Port;
 use bitflags::bitflags;
 use core::{arch::asm, fmt, marker::PhantomData};
 
@@ -22,126 +23,27 @@ bitflags! {
     }
 }
 
-trait WritePortRegister {
-    unsafe fn write_to_register(port: u16, val: Self);
-}
-
-trait ReadPortRegister {
-    unsafe fn read_from_register(port: u16) -> Self;
-}
-
-impl ReadPortRegister for u8 {
-    unsafe fn read_from_register(port: u16) -> u8 {
-        let value: u8;
-        unsafe {
-            asm!("in al, dx", out("al")value, in("dx")port,
-                 options(nomem, nostack, preserves_flags));
-        }
-        value
-    }
-}
-
-impl ReadPortRegister for u16 {
-    unsafe fn read_from_register(port: u16) -> u16 {
-        let value: u16;
-        unsafe {
-            asm!("in ax, dx", out("ax")value, in("dx")port,
-                 options(nomem, nostack, preserves_flags));
-        }
-        value
-    }
-}
-
-impl ReadPortRegister for u32 {
-    unsafe fn read_from_register(port: u16) -> u32 {
-        let value: u32;
-        unsafe {
-            asm!("in eax, dx", out("eax")value, in("dx")port,
-                 options(nomem, nostack, preserves_flags));
-        }
-        value
-    }
-}
-
-impl WritePortRegister for u8 {
-    unsafe fn write_to_register(port: u16, val: u8) {
-        unsafe {
-            asm!("out dx, al", in("dx")port, in("al")val,
-            options(nomem, nostack, preserves_flags));
-        }
-    }
-}
-
-impl WritePortRegister for u16 {
-    unsafe fn write_to_register(port: u16, value: u16) {
-        unsafe {
-            asm!("out dx, ax", in("dx") port, in("ax") value, options(nomem, nostack, preserves_flags));
-        }
-    }
-}
-
-impl WritePortRegister for u32 {
-    unsafe fn write_to_register(port: u16, val: u32) {
-        unsafe {
-            asm!("out dx, eax", in("dx")port, in("eax")val,
-            options(nomem, nostack, preserves_flags));
-        }
-    }
-}
-
-pub struct PortRegister<T> {
-    address: u16,
-    phantom: PhantomData<T>,
-}
-
-impl<T> PortRegister<T> {
-    pub fn new(address: u16) -> Self {
-        PortRegister {
-            address,
-            phantom: PhantomData,
-        }
-    }
-}
-
-impl<T: ReadPortRegister> PortRegister<T> {
-    pub unsafe fn read(&self) -> T {
-        unsafe { T::read_from_register(self.address) }
-    }
-}
-
-impl<T: WritePortRegister> PortRegister<T> {
-    pub unsafe fn write(&self, val: T) {
-        unsafe { T::write_to_register(self.address, val) }
-    }
-}
-
-impl<T> PartialEq for PortRegister<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.address == other.address
-    }
-}
-
 #[allow(dead_code)]
 pub struct SerialPort {
-    data: PortRegister<u8>,
-    int_en: PortRegister<u8>,
-    fifo_ctrl: PortRegister<u8>,
-    line_ctrl: PortRegister<u8>,
-    modem_ctrl: PortRegister<u8>,
-    line_stat: PortRegister<u8>,
-    mode_stat: PortRegister<u8>,
+    data: Port<u8>,
+    int_en: Port<u8>,
+    fifo_ctrl: Port<u8>,
+    line_ctrl: Port<u8>,
+    modem_ctrl: Port<u8>,
+    line_stat: Port<u8>,
+    mode_stat: Port<u8>,
 }
 
 impl SerialPort {
     pub fn new(base: u16) -> Self {
         SerialPort {
-            data: PortRegister::new(base),
-            int_en: PortRegister::new(base + 1),
-            fifo_ctrl: PortRegister::new(base + 2),
-            line_ctrl: PortRegister::new(base + 3),
-            modem_ctrl: PortRegister::new(base + 4),
-            line_stat: PortRegister::new(base + 5),
-            mode_stat: PortRegister::new(base + 6),
+            data: Port::new(base),
+            int_en: Port::new(base + 1),
+            fifo_ctrl: Port::new(base + 2),
+            line_ctrl: Port::new(base + 3),
+            modem_ctrl: Port::new(base + 4),
+            line_stat: Port::new(base + 5),
+            mode_stat: Port::new(base + 6),
         }
     }
 

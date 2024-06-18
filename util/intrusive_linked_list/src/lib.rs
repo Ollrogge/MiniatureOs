@@ -180,7 +180,6 @@ mod tests {
         list.push_back(&mut t1.next);
         assert!(list.len() == 1);
         list.push_back(&mut t2.next);
-        println!("List len: {}", list.len());
         assert!(list.len() == 2);
         list.push_front(&mut t3.next);
         assert!(list.len() == 3);

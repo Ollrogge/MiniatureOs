@@ -142,8 +142,6 @@ where
                 self.virtual_base + header.virtual_addr(),
             ));
 
-            let end_page = Page::containing_address(start_page.address + header.mem_size() - 1u64);
-
             let mut flags = PageTableEntryFlags::PRESENT;
             if !header.flags().is_execute() {
                 flags |= PageTableEntryFlags::NO_EXECUTE;
@@ -165,27 +163,49 @@ where
             // since we only have access to BIOS disk firmware in lower stages
 
             // Map section into memory
-            if header.file_size() > 0 {
-                for frame in PhysicalFrame::range_inclusive(start_frame, end_frame) {
-                    let frame_offset = frame - start_frame;
-                    // 1:1 mapping
-                    let page = start_page + frame_offset;
+            for frame in PhysicalFrame::range_inclusive(start_frame, end_frame) {
+                let frame_offset = frame - start_frame;
+                // 1:1 mapping
+                let page = start_page + frame_offset;
 
-                    /*
-                    println!(
-                        "Map: {:x} -> {:x}",
-                        frame.address.as_u64(),
-                        page.address.as_u64()
+                //println!("Map: {:x} -> {:x}", frame.start(), page.start());
+
+                self.page_table
+                    .map_to(frame, page, flags, self.frame_allocator)
+                    .expect("Failed to map section")
+                    .ignore();
+            }
+
+            // .bss section handling
+            if header.mem_size() > header.file_size() {
+                let zero_start = start_page.address() + header.file_size();
+                let zero_end = start_page.address() + header.mem_size() - 1;
+
+                // Special case: last non-bss frame of the segment consists partly
+                // of data and partly of bss memory, which must be zeroed. Therefore we need
+                // to be careful to only zero part of the frame
+                let data_bytes_before_zero = zero_start.as_u64() & 0xfff;
+                if data_bytes_before_zero != 0 {
+                    let last_page = Page::<Size4KiB>::containing_address(
+                        start_page.address() + header.file_size() - 1u64,
                     );
-                    */
 
-                    self.page_table
-                        .map_to(frame, page, flags, self.frame_allocator)
-                        .expect("Failed to map section")
-                        .ignore();
+                    let last_frame = self
+                        .page_table
+                        .translate(last_page)
+                        .expect("Elf load .bss: failed to translate page to frame");
+
+                    unsafe {
+                        core::ptr::write_bytes(
+                            last_frame.start() as *mut u8,
+                            0,
+                            (Size4KiB::SIZE - data_bytes_before_zero) as usize,
+                        )
+                    }
                 }
-            } else if header.file_size() == 0 && header.mem_size() > 0 {
-                // .bss section handling
+
+                let start_page = Page::containing_address(zero_start.align_up(Size4KiB::SIZE));
+                let end_page = Page::containing_address(zero_end);
                 for page in Page::range_inclusive(start_page, end_page) {
                     let frame = self
                         .frame_allocator
@@ -194,13 +214,9 @@ where
 
                     // zero the frame, (1:1 mapping)
                     let virtual_address = VirtualAddress::new(frame.address.as_u64());
-                    let slice = unsafe {
-                        slice::from_raw_parts_mut(virtual_address.as_u64() as *mut u8, frame.size())
-                    };
 
-                    // null page
-                    for e in slice.iter_mut() {
-                        *e = 0;
+                    unsafe {
+                        core::ptr::write_bytes(frame.start() as *mut u8, 0, frame.size() as usize);
                     }
 
                     self.page_table
@@ -208,12 +224,6 @@ where
                         .expect("Failed to map .bss section")
                         .ignore();
                 }
-            } else if header.mem_size() > 0 && header.file_size() > 0 {
-                // .bss that is partially included in ELF (has an actual size) ?
-                // never seen it
-                unimplemented!(
-                    "Load kernel elf: Section with both mem_size and file size bigger 0"
-                );
             }
         }
 

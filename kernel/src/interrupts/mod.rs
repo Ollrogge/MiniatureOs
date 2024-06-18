@@ -9,12 +9,36 @@ use x86_64::{
     handler_with_error_code, handler_without_error_code,
     idt::InterruptDescriptorTable,
     instructions::int3,
-    interrupts::{ExceptionStackFrame, PageFaultErrorCode},
+    interrupts::{self, ExceptionStackFrame, PageFaultErrorCode},
     memory::{Address, VirtualAddress},
+    mutex::Mutex,
     pop_scratch_registers, println, push_scratch_registers,
     register::{CS, SS},
     tss::{TaskStateSegment, DOUBLE_FAULT_IST_IDX},
 };
+mod hardware;
+use hardware::pic8259::ChainedPics;
+
+pub const MASTER_PIC_OFFSET: u8 = 0x20;
+pub const SLAVE_PIC_OFFSET: u8 = MASTER_PIC_OFFSET + 8;
+
+static PIC: Mutex<ChainedPics> = Mutex::new(ChainedPics::new());
+
+#[derive(Debug, Clone, Copy)]
+#[repr(u8)]
+pub enum InterruptIndex {
+    Timer = MASTER_PIC_OFFSET,
+}
+
+impl InterruptIndex {
+    fn as_u8(self) -> u8 {
+        self as u8
+    }
+
+    fn as_usize(self) -> usize {
+        usize::from(self.as_u8())
+    }
+}
 
 lazy_static! {
     static ref IDT: InterruptDescriptorTable = {
@@ -36,6 +60,10 @@ lazy_static! {
             idt.double_fault
                 .set_handler_function(handler_with_error_code!(double_fault_handler))
                 .set_interrupt_stack_index(DOUBLE_FAULT_IST_IDX as u16);
+
+            idt.interrupts
+                [InterruptIndex::Timer.as_usize() - InterruptDescriptorTable::interrups_offset()]
+            .set_handler_function(handler_without_error_code!(timer_interrupt_handler));
         }
 
         idt
@@ -91,6 +119,10 @@ pub fn init() {
     }
 
     IDT.load();
+
+    PIC.lock().init(MASTER_PIC_OFFSET, SLAVE_PIC_OFFSET);
+
+    unsafe { interrupts::enable() };
 }
 
 // C calling convention
@@ -136,4 +168,8 @@ extern "C" fn breakpoint_handler(frame: &ExceptionStackFrame) {
 extern "C" fn double_fault_handler(frame: &ExceptionStackFrame, error_code: u64) -> ! {
     println!("Double fault handler");
     loop {}
+}
+
+extern "C" fn timer_interrupt_handler(frame: &ExceptionStackFrame) {
+    println!(".");
 }

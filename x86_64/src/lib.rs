@@ -8,6 +8,7 @@ pub mod interrupts;
 pub mod memory;
 pub mod mutex;
 pub mod paging;
+pub mod port;
 pub mod print;
 pub mod register;
 pub mod tss;
