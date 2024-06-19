@@ -133,16 +133,16 @@ pub struct InterruptDescriptorTable {
     pub machine_check: InterruptDescriptor,
     pub simd_floating_point: InterruptDescriptor,
     pub virtualization: InterruptDescriptor,
-    pub cp_protection_exception: InterruptDescriptor,
+    pub control_protection_exception: InterruptDescriptor,
     reserved_2: [InterruptDescriptor; 6],
-    pub hv_injection_exception: InterruptDescriptor,
+    pub hypervisor_injection_exception: InterruptDescriptor,
     pub vmm_communication_exception: InterruptDescriptor,
     pub security_exception: InterruptDescriptor,
     reserved_3: InterruptDescriptor,
     pub interrupts: [InterruptDescriptor; 256 - 32],
 }
 const_assert!(
-    size_of::<InterruptDescriptorTable>() == 256 * 0x10,
+    size_of::<InterruptDescriptorTable>() == 256 * size_of::<InterruptDescriptor>(),
     "IDT has invalid size"
 );
 
@@ -162,10 +162,6 @@ impl InterruptDescriptorTable {
         unsafe {
             lidt(&desc);
         };
-    }
-
-    pub const fn interrups_offset() -> usize {
-        32
     }
 }
 
@@ -193,9 +189,9 @@ impl Default for InterruptDescriptorTable {
             machine_check: InterruptDescriptor::missing(),
             simd_floating_point: InterruptDescriptor::missing(),
             virtualization: InterruptDescriptor::missing(),
-            cp_protection_exception: InterruptDescriptor::missing(),
+            control_protection_exception: InterruptDescriptor::missing(),
             reserved_2: [InterruptDescriptor::missing(); 6],
-            hv_injection_exception: InterruptDescriptor::missing(),
+            hypervisor_injection_exception: InterruptDescriptor::missing(),
             vmm_communication_exception: InterruptDescriptor::missing(),
             security_exception: InterruptDescriptor::missing(),
             reserved_3: InterruptDescriptor::missing(),

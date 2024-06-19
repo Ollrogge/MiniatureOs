@@ -335,6 +335,11 @@ impl CS {
     ///
     #[cfg(target_arch = "x86_64")]
     pub unsafe fn write(val: SegmentSelector) {
+        Self::write_raw(val.raw() as usize)
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    pub unsafe fn write_raw(val: usize) {
         unsafe {
             asm!(
                 "push {sel}",
@@ -342,7 +347,7 @@ impl CS {
                 "push {tmp}",
                 "retfq",
                 "1:",
-                sel = in(reg) usize::from(val.raw()),
+                sel = in(reg) val,
                 tmp = lateout(reg) _,
                 options(preserves_flags),
             );
@@ -377,9 +382,13 @@ impl SS {
     /// Directly writing to the code segment register can lead to undefined
     /// behavior if the value is wrong
     pub unsafe fn write(val: SegmentSelector) {
+        Self::write_raw(val.raw())
+    }
+
+    pub unsafe fn write_raw(val: u16) {
         unsafe {
             asm!(
-                "mov ss, {:x}", in(reg) val.raw(),
+                "mov ss, {:x}", in(reg) val,
                 options(nostack, nomem, preserves_flags)
             )
         };
@@ -404,7 +413,11 @@ impl DS {
     /// # Safety
     ///
     /// Directly writing to the ds register can lead to undefined behavior
-    pub unsafe fn write(val: u16) {
+    pub unsafe fn write(val: SegmentSelector) {
+        Self::write_raw(val.raw());
+    }
+
+    pub unsafe fn write_raw(val: u16) {
         unsafe {
             asm!(
                 "mov ds, {:x}", in(reg) val,
@@ -432,7 +445,11 @@ impl ES {
     /// # Safety
     ///
     /// Directly writing to the es register can lead to undefined behavior
-    pub unsafe fn write(val: u16) {
+    pub unsafe fn write(val: SegmentSelector) {
+        Self::write_raw(val.raw());
+    }
+
+    pub unsafe fn write_raw(val: u16) {
         unsafe {
             asm!(
                 "mov es, {:x}", in(reg) val,

@@ -13,7 +13,7 @@ use x86_64::{
     memory::{Address, VirtualAddress},
     mutex::Mutex,
     pop_scratch_registers, println, push_scratch_registers,
-    register::{CS, SS},
+    register::{CS, DS, ES, SS},
     tss::{TaskStateSegment, DOUBLE_FAULT_IST_IDX},
 };
 mod hardware;
@@ -27,7 +27,7 @@ static PIC: Mutex<ChainedPics> = Mutex::new(ChainedPics::new());
 #[derive(Debug, Clone, Copy)]
 #[repr(u8)]
 pub enum InterruptIndex {
-    Timer = MASTER_PIC_OFFSET,
+    Timer = 0,
 }
 
 impl InterruptIndex {
@@ -47,23 +47,28 @@ lazy_static! {
         unsafe {
             idt.divide_error
                 .set_handler_function(handler_without_error_code!(divide_by_zero_handler));
+
             idt.breakpoint
                 .set_handler_function(handler_without_error_code!(breakpoint_handler));
+
             idt.invalid_opcode
                 .set_handler_function(handler_without_error_code!(invalid_opcode_handler));
+
+            idt.segment_not_present
+                .set_handler_function(handler_with_error_code!(segment_not_present_handler));
 
             idt.page_fault
                 .set_handler_function(handler_with_error_code!(page_fault_handler));
 
             idt.alignment_check
                 .set_handler_function(handler_with_error_code!(alignment_check_handler));
+
             idt.double_fault
                 .set_handler_function(handler_with_error_code!(double_fault_handler))
                 .set_interrupt_stack_index(DOUBLE_FAULT_IST_IDX as u16);
 
-            idt.interrupts
-                [InterruptIndex::Timer.as_usize() - InterruptDescriptorTable::interrups_offset()]
-            .set_handler_function(handler_without_error_code!(timer_interrupt_handler));
+            idt.interrupts[InterruptIndex::Timer.as_usize()]
+                .set_handler_function(handler_without_error_code!(timer_interrupt_handler));
         }
 
         idt
@@ -95,8 +100,11 @@ lazy_static! {
         SegmentSelector
     ) = {
         let mut gdt = GlobalDescriptorTable::new();
+        // 8
         let tss_selector = gdt.add_entry(SegmentDescriptor::new_tss_segment(&TSS));
+        // 0x18
         let kernel_code_selector = gdt.add_entry(SegmentDescriptor::kernel_code_segment());
+        // 0x20
         let kernel_data_selector = gdt.add_entry(SegmentDescriptor::kernel_data_segment());
         (
             gdt,
@@ -111,8 +119,10 @@ pub fn init() {
     // load the gdt
     GDT.0.load();
     unsafe {
-        // update cs and ss segment registers as they have to point to same selectors
+        // update cs and ss segment registers
         CS::write(GDT.2);
+        DS::write(GDT.3);
+        ES::write(GDT.3);
         SS::write(GDT.3);
         // load the tss selector into the task register
         TaskStateSegment::load(GDT.1);
@@ -120,8 +130,8 @@ pub fn init() {
 
     IDT.load();
 
+    // initialize & remap pic
     PIC.lock().init(MASTER_PIC_OFFSET, SLAVE_PIC_OFFSET);
-
     unsafe { interrupts::enable() };
 }
 
@@ -138,6 +148,14 @@ extern "C" fn invalid_opcode_handler(frame: &ExceptionStackFrame) -> ! {
 
 extern "C" fn general_protection_fault_handler(frame: &ExceptionStackFrame, error_code: u64) -> ! {
     println!("General protection fault");
+    loop {}
+}
+
+extern "C" fn segment_not_present_handler(frame: &ExceptionStackFrame, error_code: u64) -> ! {
+    println!(
+        "General protection fault handler \n error_code: {:?} \n exception frame: {:?}",
+        error_code, frame
+    );
     loop {}
 }
 
@@ -165,11 +183,12 @@ extern "C" fn breakpoint_handler(frame: &ExceptionStackFrame) {
 // handling of a prior (first) exception handler”. The “can” is important:
 // Only very specific combinations of exceptions lead to a double fault
 // https://os.phil-opp.com/double-fault-exceptions/
-extern "C" fn double_fault_handler(frame: &ExceptionStackFrame, error_code: u64) -> ! {
-    println!("Double fault handler");
+// (A double fault will always generate an error code with a value of zero. )
+extern "C" fn double_fault_handler(frame: &ExceptionStackFrame, _error_code: u64) -> ! {
+    println!("Double fault handler: {:?}", frame);
     loop {}
 }
 
 extern "C" fn timer_interrupt_handler(frame: &ExceptionStackFrame) {
-    println!(".");
+    println!("TIMER INTERRUPT");
 }

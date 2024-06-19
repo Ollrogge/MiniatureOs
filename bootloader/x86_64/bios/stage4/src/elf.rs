@@ -133,14 +133,13 @@ where
             let physical_start_address =
                 PhysicalAddress::new(self.info.kernel.start + header.offset());
             let start_frame = PhysicalFrame::containing_address(physical_start_address);
-
             let end_frame: PhysicalFrame = PhysicalFrame::containing_address(
                 physical_start_address + header.file_size() - 1u64,
             );
 
-            let start_page = Page::containing_address(VirtualAddress::new(
-                self.virtual_base + header.virtual_addr(),
-            ));
+            let virtual_start_address =
+                VirtualAddress::new(self.virtual_base + header.virtual_addr());
+            let start_page = Page::containing_address(virtual_start_address);
 
             let mut flags = PageTableEntryFlags::PRESENT;
             if !header.flags().is_execute() {
@@ -168,7 +167,14 @@ where
                 // 1:1 mapping
                 let page = start_page + frame_offset;
 
-                //println!("Map: {:x} -> {:x}", frame.start(), page.start());
+                /*
+                println!(
+                    "Map: {:x} -> {:x} {}",
+                    frame.start(),
+                    page.start(),
+                    frame_offset
+                );
+                */
 
                 self.page_table
                     .map_to(frame, page, flags, self.frame_allocator)
@@ -178,8 +184,9 @@ where
 
             // .bss section handling
             if header.mem_size() > header.file_size() {
-                let zero_start = start_page.address() + header.file_size();
-                let zero_end = start_page.address() + header.mem_size() - 1;
+                // take header virtual address NOT page, since page is aligned down
+                let zero_start = virtual_start_address + header.file_size();
+                let zero_end = virtual_start_address + header.mem_size() - 1u64;
 
                 // Special case: last non-bss frame of the segment consists partly
                 // of data and partly of bss memory, which must be zeroed. Therefore we need
@@ -187,7 +194,7 @@ where
                 let data_bytes_before_zero = zero_start.as_u64() & 0xfff;
                 if data_bytes_before_zero != 0 {
                     let last_page = Page::<Size4KiB>::containing_address(
-                        start_page.address() + header.file_size() - 1u64,
+                        virtual_start_address + header.file_size() - 1u64,
                     );
 
                     let last_frame = self
@@ -195,9 +202,11 @@ where
                         .translate(last_page)
                         .expect("Elf load .bss: failed to translate page to frame");
 
+                    let ptr = last_frame.start() as *mut u8;
+
                     unsafe {
                         core::ptr::write_bytes(
-                            last_frame.start() as *mut u8,
+                            ptr.add(data_bytes_before_zero as usize),
                             0,
                             (Size4KiB::SIZE - data_bytes_before_zero) as usize,
                         )
@@ -206,14 +215,24 @@ where
 
                 let start_page = Page::containing_address(zero_start.align_up(Size4KiB::SIZE));
                 let end_page = Page::containing_address(zero_end);
+                /*
+                println!(
+                    "Aligned: {:#x} {:#x} {:#x} {} {} {:#x} {:#x} {:#x}",
+                    zero_start.as_u64(),
+                    start_page.start(),
+                    end_page.start(),
+                    header.file_size(),
+                    header.mem_size(),
+                    end_frame.start(),
+                    start_frame.start(),
+                    physical_start_address + header.file_size() - 1u64,
+                );
+                */
                 for page in Page::range_inclusive(start_page, end_page) {
                     let frame = self
                         .frame_allocator
                         .allocate_frame()
                         .expect("Failed to allocate frame for .bss");
-
-                    // zero the frame, (1:1 mapping)
-                    let virtual_address = VirtualAddress::new(frame.address.as_u64());
 
                     unsafe {
                         core::ptr::write_bytes(frame.start() as *mut u8, 0, frame.size() as usize);

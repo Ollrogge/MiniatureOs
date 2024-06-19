@@ -127,8 +127,6 @@ unsafe fn test_buddy_allocator() {
     assert!(c4.as_ref().start() == addr);
 
     allocator.dealloc(c4);
-
-    println!("Testing buddy allocator done");
 }
 
 fn test_heap_allocations() {
@@ -167,9 +165,6 @@ fn start(info: &'static BootInfo) -> ! {
     test_heap_allocations();
     println!("Heap tested");
 
-    // invalid opcode
-    /*
-     */
     trigger_int3();
 
     //trigger_page_fault();

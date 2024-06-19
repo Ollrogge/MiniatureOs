@@ -31,13 +31,13 @@ use x86_64::{
 
 #[repr(u8)]
 enum InitialisationWord1 {
-    Icw4 = 1,
-    Init = 10,
+    Icw4 = 0x1,
+    Init = 0x10,
 }
 
 #[repr(u8)]
 enum InitialisationWord4 {
-    Mode8086 = 1,
+    Mode8086 = 0x1,
 }
 
 pub struct Pic {
@@ -84,8 +84,12 @@ impl ChainedPics {
     }
 
     // https://wiki.osdev.org/8259_PIC
+    // default configuration of the PIC is not usable because it sends interrupt
+    // vector numbers in the range of 0–15 to the CPU. These however are already
+    // occupied by exceptions. Therefore we need to remap PIC interrupts to
+    // different numbers
     pub fn init(&mut self, master_offset: u8, slave_offset: u8) {
-        println!("Initializing PIC");
+        println!("Initializing PIC {} {}", master_offset, slave_offset);
         // save masks
         // (When no command is issued, the data port allows us to access the interrupt mask of the 8259 PIC. )
         let master_mask = self.master.read_data();
@@ -101,11 +105,11 @@ impl ChainedPics {
         io_wait();
 
         // remap master interrupt vector offset
-        self.master.data.write(master_offset);
+        self.master.write_data(master_offset);
         io_wait();
 
         // remap slave interrupt vector offset
-        self.master.write_data(slave_offset);
+        self.slave.write_data(slave_offset);
         io_wait();
 
         // tell master there is a slave PIC at IRQ2 (third line)

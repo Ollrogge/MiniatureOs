@@ -56,7 +56,6 @@ where
         .expect("Failed to map guard page")
         .flush();
 
-    // init buddy allocator
     let mut allocator = ALLOCATOR.lock();
     allocator.init(HEAP_START, HEAP_SIZE);
 }

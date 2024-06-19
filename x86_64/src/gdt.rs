@@ -151,7 +151,8 @@ impl SegmentDescriptor {
             | SegmentDescriptorFlags::PRESENT
             | SegmentDescriptorFlags::USER_SEGMENT
             | SegmentDescriptorFlags::LONG_MODE
-            | SegmentDescriptorFlags::ACCESSED;
+            | SegmentDescriptorFlags::ACCESSED
+            | SegmentDescriptorFlags::GRANULARITY;
 
         // 64-bit mode, the Base and Limit values are ignored, each descriptor
         // covers the entire linear address space regardless of what they are set to.
@@ -162,8 +163,11 @@ impl SegmentDescriptor {
         let flags = SegmentDescriptorFlags::READ_WRITE
             | SegmentDescriptorFlags::PRESENT
             | SegmentDescriptorFlags::USER_SEGMENT
-            | SegmentDescriptorFlags::ACCESSED;
+            | SegmentDescriptorFlags::ACCESSED
+            | SegmentDescriptorFlags::GRANULARITY;
 
+        // 64-bit mode, the Base and Limit values are ignored, each descriptor
+        // covers the entire linear address space regardless of what they are set to.
         SegmentDescriptor::new_user(flags, 0, 0)
     }
 

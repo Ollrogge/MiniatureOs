@@ -62,10 +62,21 @@ fn jump_to_stage4(info: &BiosInfo) {
 
             // reload segment registers
             // 0x10 = offset 2 in gdt = data descriptor
-            "mov {0}, 0x10",
-            "mov ds, {0}",
-            "mov es, {0}",
-            "mov ss, {0}",
+            /*
+            "mov {1}, 0x10",
+            "mov ds, {1}",
+            "mov es, {1}",
+            "mov ss, {1}",
+            */
+            // segment registers ignored by almost all instructions in long mode.
+            // However some expect valid data segment descriptor or the null
+            // descriptor in those registers. So just null them
+            "mov ax, 0",
+            "mov ss, ax",
+            "mov ds, ax",
+            "mov es, ax",
+            "mov fs, ax",
+            "mov gs, ax",
 
             // jump to fourth
             "pop rax",
@@ -75,7 +86,6 @@ fn jump_to_stage4(info: &BiosInfo) {
             // enter endless loop in case third stage returns
             "2:",
             "jmp 2b",
-            out(reg) _,
             out("rax")_,
             out("rdi")_
         );

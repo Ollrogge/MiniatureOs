@@ -45,5 +45,6 @@ pub fn kernel_init(
         BumpFrameAllocator::new(boot_info.memory_regions.iter().copied().peekable());
 
     init_heap(&mut page_table, &mut frame_allocator);
+
     Ok((frame_allocator, page_table))
 }

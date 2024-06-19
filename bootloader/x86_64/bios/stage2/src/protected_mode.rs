@@ -69,9 +69,6 @@ pub fn enter_unreal_mode() {
     unsafe {
         asm!("mov ds, {0:x}", in(reg) ds, options(nostack, preserves_flags));
         asm!("mov ss, {0:x}", in(reg) ss, options(nostack, preserves_flags));
-    }
-
-    unsafe {
         interrupts::enable();
     }
 }

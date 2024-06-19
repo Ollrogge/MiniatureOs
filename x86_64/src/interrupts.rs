@@ -8,7 +8,7 @@ use core::{arch::asm, fmt};
 /// This function is unsafe because it directly manipulates the CPU state. The caller must ensure
 /// that disabling interrupts does not lead to deadlocks or race conditions in the code.
 pub unsafe fn disable() {
-    unsafe { asm!("cli", options(nostack, nomem, preserves_flags)) }
+    unsafe { asm!("cli", options(nostack, preserves_flags)) }
 }
 
 /// Enables CPU interrupts.
@@ -19,7 +19,7 @@ pub unsafe fn disable() {
 /// that re-enabling interrupts is safe and does not introduce race conditions with other threads
 /// or interrupt handlers.
 pub unsafe fn enable() {
-    unsafe { asm!("sti", options(nostack, nomem, preserves_flags)) }
+    unsafe { asm!("sti", options(nostack, preserves_flags)) }
 }
 
 // todo: https://os.phil-opp.com/catching-exceptions/

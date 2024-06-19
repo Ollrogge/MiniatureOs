@@ -98,8 +98,11 @@ impl<T> PartialEq for Port<T> {
     }
 }
 
+// write to an used port to cause a small delay (1-4 microseconds)
+// necessary on older machines to give PIC some time to react to commands as they
+// might now be preserved fast enough
 pub fn io_wait() {
     unsafe {
-        asm!("out dx, ax", in("dx") 0x80, in("ax") 0, options(nomem, nostack, preserves_flags));
+        asm!("out dx, al", in("dx") 0x80u16, in("al") 0u8, options(nomem, nostack, preserves_flags));
     }
 }
