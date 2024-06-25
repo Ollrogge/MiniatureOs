@@ -41,6 +41,11 @@ enum InitialisationWord4 {
     Mode8086 = 0x1,
 }
 
+#[repr(u8)]
+enum Commands {
+    EndOfInterrupt = 0x20,
+}
+
 #[derive(Debug)]
 pub struct Pic {
     command: Port<u8>,
@@ -139,6 +144,13 @@ impl ChainedPics {
         self.slave.write_data(slave_mask);
     }
 
-    // TODO
-    pub fn end_of_interrupt(&self) {}
+    // Signal to PIC that we are done and ready to receive next interrupt.
+    // Else PIC won't signal another interrupt
+    pub fn notify_end_of_interrupt(&self, irq_number: u8) {
+        if irq_number >= 8 {
+            self.slave.write_command(Commands::EndOfInterrupt as u8);
+        }
+
+        self.master.write_command(Commands::EndOfInterrupt as u8);
+    }
 }

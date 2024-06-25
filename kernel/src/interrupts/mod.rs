@@ -12,7 +12,7 @@ use x86_64::{
     interrupts::{self, ExceptionStackFrame, PageFaultErrorCode},
     memory::{Address, PageSize, Size4KiB, VirtualAddress},
     mutex::Mutex,
-    pop_scratch_registers, println, push_scratch_registers,
+    pop_scratch_registers, print, println, push_scratch_registers,
     register::{CS, DS, ES, SS},
     tss::{TaskStateSegment, DOUBLE_FAULT_IST_IDX},
 };
@@ -21,7 +21,7 @@ mod hardware;
 use hardware::pic8259::ChainedPics;
 pub const MASTER_PIC_OFFSET: u8 = 0x20;
 pub const SLAVE_PIC_OFFSET: u8 = MASTER_PIC_OFFSET + 8;
-static PIC: Mutex<ChainedPics> = Mutex::new(ChainedPics::new());
+static PICS: Mutex<ChainedPics> = Mutex::new(ChainedPics::new());
 
 #[derive(Debug, Clone, Copy)]
 #[repr(u8)]
@@ -36,6 +36,10 @@ impl InterruptIndex {
 
     fn as_usize(self) -> usize {
         usize::from(self.as_u8())
+    }
+
+    fn as_remapped_idt_number(self) -> u8 {
+        self.as_u8() + MASTER_PIC_OFFSET as u8
     }
 }
 
@@ -145,7 +149,7 @@ pub fn init() {
     IDT.load();
 
     // initialize & remap pic
-    PIC.lock().init(MASTER_PIC_OFFSET, SLAVE_PIC_OFFSET);
+    PICS.lock().init(MASTER_PIC_OFFSET, SLAVE_PIC_OFFSET);
     //PIC.lock().remap_pic();
     unsafe { interrupts::enable() };
 }
@@ -227,7 +231,8 @@ extern "C" fn double_fault_handler(frame: &ExceptionStackFrame, _error_code: u64
     loop {}
 }
 
-extern "C" fn timer_interrupt_handler(frame: &ExceptionStackFrame) {
-    println!("TIMER INTERRUPT");
-    loop {}
+extern "C" fn timer_interrupt_handler(_frame: &ExceptionStackFrame) {
+    print!(".");
+    PICS.lock()
+        .notify_end_of_interrupt(InterruptIndex::Timer.as_remapped_idt_number());
 }
