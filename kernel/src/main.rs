@@ -158,6 +158,7 @@ fn start(info: &'static BootInfo) -> ! {
     let (frame_allocator, page_table) =
         kernel_init(info).expect("Error while trying to initialize kernel");
     println!("Kernel initialized");
+    loop {}
 
     unsafe { test_buddy_allocator() };
     println!("Buddy allocator tested");
@@ -168,6 +169,7 @@ fn start(info: &'static BootInfo) -> ! {
     trigger_int3();
 
     //trigger_page_fault();
+    loop {}
 
     stack_overflow();
 

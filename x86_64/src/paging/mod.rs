@@ -48,6 +48,34 @@ bitflags! {
         /// Indicates that the mapping is present in all address spaces, so it isn't flushed from
         /// the TLB on an address space switch.
         const GLOBAL =          1 << 8;
+        /// Available to the OS, can be used to store additional data, e.g. custom flags.
+        const BIT_9 =           1 << 9;
+        /// Available to the OS, can be used to store additional data, e.g. custom flags.
+        const BIT_10 =          1 << 10;
+        /// Available to the OS, can be used to store additional data, e.g. custom flags.
+        const BIT_11 =          1 << 11;
+        /// Available to the OS, can be used to store additional data, e.g. custom flags.
+        const BIT_52 =          1 << 52;
+        /// Available to the OS, can be used to store additional data, e.g. custom flags.
+        const BIT_53 =          1 << 53;
+        /// Available to the OS, can be used to store additional data, e.g. custom flags.
+        const BIT_54 =          1 << 54;
+        /// Available to the OS, can be used to store additional data, e.g. custom flags.
+        const BIT_55 =          1 << 55;
+        /// Available to the OS, can be used to store additional data, e.g. custom flags.
+        const BIT_56 =          1 << 56;
+        /// Available to the OS, can be used to store additional data, e.g. custom flags.
+        const BIT_57 =          1 << 57;
+        /// Available to the OS, can be used to store additional data, e.g. custom flags.
+        const BIT_58 =          1 << 58;
+        /// Available to the OS, can be used to store additional data, e.g. custom flags.
+        const BIT_59 =          1 << 59;
+        /// Available to the OS, can be used to store additional data, e.g. custom flags.
+        const BIT_60 =          1 << 60;
+        /// Available to the OS, can be used to store additional data, e.g. custom flags.
+        const BIT_61 =          1 << 61;
+        /// Available to the OS, can be used to store additional data, e.g. custom flags.
+        const BIT_62 =          1 << 62;
         /// Forbid code execution from the mapped frames.
         ///
         /// Can be only used when the no-execute page protection feature is enabled in the EFER
@@ -94,7 +122,15 @@ impl PageTableEntry {
     }
 
     pub fn set_flags(&mut self, flags: PageTableEntryFlags) {
+        self.0 = flags.bits();
+    }
+
+    pub fn add_flags(&mut self, flags: PageTableEntryFlags) {
         self.0 = self.0 | flags.bits();
+    }
+
+    pub fn set_unused(&mut self) {
+        self.0 = 0;
     }
 }
 
@@ -158,6 +194,12 @@ pub enum MappingError {
     PageAlreadyMapped,
 }
 
+#[derive(Debug)]
+pub enum UnmappingError {
+    // Given page not mapped to physical frame
+    PageNotMapped,
+}
+
 // TODO: make unsafe to mark that these functions are inherently unsafe
 // S = trait wide scope
 pub trait Mapper<S: PageSize> {
@@ -184,6 +226,9 @@ pub trait Mapper<S: PageSize> {
         let page = Page::containing_address(VirtualAddress::new(frame.address.as_u64()));
         self.map_to(frame, page, flags, frame_allocator)
     }
+
+    fn unmap(&mut self, page: Page<S>)
+        -> Result<(PhysicalFrame<S>, TlbFlusher<S>), UnmappingError>;
 }
 
 pub trait MapperAllSizes: Mapper<Size4KiB> + Mapper<Size2MiB> {}
@@ -201,7 +246,10 @@ impl<T> TranslatorAllSizes for T where T: Translator<Size4KiB> + Translator<Size
 
 /// Translates page to physical frame using page table
 pub trait Translator<S: PageSize> {
-    fn translate(&self, page: Page<S>) -> Result<PhysicalFrame<S>, TranslationError>;
+    fn translate(
+        &self,
+        page: Page<S>,
+    ) -> Result<(PhysicalFrame<S>, PageTableEntryFlags), TranslationError>;
 }
 
 #[must_use = "Page table changes must be flushed or ignored"]

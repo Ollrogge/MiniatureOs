@@ -36,6 +36,9 @@
 **Logging**
 + add proper logging
 
+**Sizes**
++ Have Size4Kib::SIZE actually be a usize and not u64
+
 **Memory regions**
 + better differentiate between BIOS firmware memory regions, bootloaders ones, kernel ones...
 

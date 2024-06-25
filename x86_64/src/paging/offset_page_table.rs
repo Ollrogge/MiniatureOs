@@ -4,7 +4,7 @@ use crate::{
     paging::{
         mapped_page_table::{MappedPageTable, PageTableFrameMapping, PageTableWalker},
         FrameAllocator, Mapper, MappingError, Page, PageTable, PageTableEntryFlags,
-        TranslationError, Translator,
+        TranslationError, Translator, UnmappingError,
     },
 };
 #[derive(Debug)]
@@ -51,6 +51,13 @@ impl<'a, P: PageTableFrameMapping> Mapper<Size4KiB> for OffsetPageTable<'a, P> {
     {
         self.inner.map_to(frame, page, flags, frame_allocator)
     }
+
+    fn unmap(
+        &mut self,
+        page: Page<Size4KiB>,
+    ) -> Result<(PhysicalFrame<Size4KiB>, TlbFlusher<Size4KiB>), UnmappingError> {
+        self.inner.unmap(page)
+    }
 }
 
 impl<'a, P: PageTableFrameMapping> Mapper<Size2MiB> for OffsetPageTable<'a, P> {
@@ -66,16 +73,29 @@ impl<'a, P: PageTableFrameMapping> Mapper<Size2MiB> for OffsetPageTable<'a, P> {
     {
         self.inner.map_to(frame, page, flags, frame_allocator)
     }
+
+    fn unmap(
+        &mut self,
+        page: Page<Size2MiB>,
+    ) -> Result<(PhysicalFrame<Size2MiB>, TlbFlusher<Size2MiB>), UnmappingError> {
+        self.inner.unmap(page)
+    }
 }
 
 impl<'a, P: PageTableFrameMapping> Translator<Size4KiB> for OffsetPageTable<'a, P> {
-    fn translate(&self, page: Page<Size4KiB>) -> Result<PhysicalFrame<Size4KiB>, TranslationError> {
+    fn translate(
+        &self,
+        page: Page<Size4KiB>,
+    ) -> Result<(PhysicalFrame<Size4KiB>, PageTableEntryFlags), TranslationError> {
         self.inner.translate(page)
     }
 }
 
 impl<'a, P: PageTableFrameMapping> Translator<Size2MiB> for OffsetPageTable<'a, P> {
-    fn translate(&self, page: Page<Size2MiB>) -> Result<PhysicalFrame<Size2MiB>, TranslationError> {
+    fn translate(
+        &self,
+        page: Page<Size2MiB>,
+    ) -> Result<(PhysicalFrame<Size2MiB>, PageTableEntryFlags), TranslationError> {
         self.inner.translate(page)
     }
 }

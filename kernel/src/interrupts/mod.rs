@@ -10,18 +10,17 @@ use x86_64::{
     idt::InterruptDescriptorTable,
     instructions::int3,
     interrupts::{self, ExceptionStackFrame, PageFaultErrorCode},
-    memory::{Address, VirtualAddress},
+    memory::{Address, PageSize, Size4KiB, VirtualAddress},
     mutex::Mutex,
     pop_scratch_registers, println, push_scratch_registers,
     register::{CS, DS, ES, SS},
     tss::{TaskStateSegment, DOUBLE_FAULT_IST_IDX},
 };
+
 mod hardware;
 use hardware::pic8259::ChainedPics;
-
 pub const MASTER_PIC_OFFSET: u8 = 0x20;
 pub const SLAVE_PIC_OFFSET: u8 = MASTER_PIC_OFFSET + 8;
-
 static PIC: Mutex<ChainedPics> = Mutex::new(ChainedPics::new());
 
 #[derive(Debug, Clone, Copy)]
@@ -48,14 +47,29 @@ lazy_static! {
             idt.divide_error
                 .set_handler_function(handler_without_error_code!(divide_by_zero_handler));
 
+            idt.debug
+                .set_handler_function(handler_without_error_code!(debug_handler));
+
+            idt.non_maskable_interrupt
+                .set_handler_function(handler_without_error_code!(non_maskable_interrupt));
+
             idt.breakpoint
                 .set_handler_function(handler_without_error_code!(breakpoint_handler));
 
             idt.invalid_opcode
                 .set_handler_function(handler_without_error_code!(invalid_opcode_handler));
 
+            idt.device_not_available
+                .set_handler_function(handler_without_error_code!(device_not_available_handler));
+
+            idt.invalid_tss
+                .set_handler_function(handler_with_error_code!(invalid_tss_handler));
+
             idt.segment_not_present
                 .set_handler_function(handler_with_error_code!(segment_not_present_handler));
+
+            idt.stack_segment_fault
+                .set_handler_function(handler_with_error_code!(stack_segment_fault_handler));
 
             idt.page_fault
                 .set_handler_function(handler_with_error_code!(page_fault_handler));
@@ -79,7 +93,7 @@ lazy_static! {
     static ref TSS: TaskStateSegment = {
         let mut tss = TaskStateSegment::new();
         tss.interrupt_stack_table[DOUBLE_FAULT_IST_IDX] = {
-            const STACK_SIZE: usize = 4096 * 5;
+            const STACK_SIZE: usize = Size4KiB::SIZE as usize * 5;
             static mut STACK: [u8; STACK_SIZE] = [0; STACK_SIZE];
 
             let stack_start = VirtualAddress::from_ptr(unsafe { &STACK });
@@ -100,7 +114,7 @@ lazy_static! {
         SegmentSelector
     ) = {
         let mut gdt = GlobalDescriptorTable::new();
-        // 8
+        // 0x8
         let tss_selector = gdt.add_entry(SegmentDescriptor::new_tss_segment(&TSS));
         // 0x18
         let kernel_code_selector = gdt.add_entry(SegmentDescriptor::kernel_code_segment());
@@ -132,6 +146,7 @@ pub fn init() {
 
     // initialize & remap pic
     PIC.lock().init(MASTER_PIC_OFFSET, SLAVE_PIC_OFFSET);
+    //PIC.lock().remap_pic();
     unsafe { interrupts::enable() };
 }
 
@@ -174,8 +189,30 @@ extern "C" fn alignment_check_handler(frame: &ExceptionStackFrame, error_code: u
     loop {}
 }
 
+extern "C" fn invalid_tss_handler(frame: &ExceptionStackFrame, error_code: u64) -> ! {
+    println!("Invalid tss handler: {:?}", frame);
+    loop {}
+}
+
+extern "C" fn stack_segment_fault_handler(frame: &ExceptionStackFrame, error_code: u64) -> ! {
+    println!("Stack segment handler: {:?}", frame);
+    loop {}
+}
+
 extern "C" fn breakpoint_handler(frame: &ExceptionStackFrame) {
     println!("Int3 triggered: {:?}", frame);
+}
+
+extern "C" fn non_maskable_interrupt(frame: &ExceptionStackFrame) {
+    println!("Non maskable interrupt handler {:?}", frame);
+}
+
+extern "C" fn debug_handler(frame: &ExceptionStackFrame) {
+    println!("Debug handler {:?}", frame);
+}
+
+extern "C" fn device_not_available_handler(frame: &ExceptionStackFrame) {
+    println!("Device not available handler {:?}", frame);
 }
 
 // double fault acts kind of like a catch-all block
@@ -185,10 +222,12 @@ extern "C" fn breakpoint_handler(frame: &ExceptionStackFrame) {
 // https://os.phil-opp.com/double-fault-exceptions/
 // (A double fault will always generate an error code with a value of zero. )
 extern "C" fn double_fault_handler(frame: &ExceptionStackFrame, _error_code: u64) -> ! {
+    println!("Double fault error code: {}", _error_code);
     println!("Double fault handler: {:?}", frame);
     loop {}
 }
 
 extern "C" fn timer_interrupt_handler(frame: &ExceptionStackFrame) {
     println!("TIMER INTERRUPT");
+    loop {}
 }

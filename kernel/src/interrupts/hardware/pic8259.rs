@@ -24,6 +24,7 @@
 //! https://os.phil-opp.com/hardware-interrupts/
 //!
 //!
+use core::arch::asm;
 use x86_64::{
     port::{io_wait, Port},
     println,
@@ -40,6 +41,7 @@ enum InitialisationWord4 {
     Mode8086 = 0x1,
 }
 
+#[derive(Debug)]
 pub struct Pic {
     command: Port<u8>,
     data: Port<u8>,
@@ -50,7 +52,7 @@ const SLAVE_PIC_BASE: u16 = 0xa0;
 
 impl Pic {
     pub const fn new(command: Port<u8>, data: Port<u8>) -> Self {
-        Self { data, command }
+        Self { command, data }
     }
 
     pub fn read_command(&self) -> u8 {
@@ -58,7 +60,7 @@ impl Pic {
     }
 
     pub fn write_command(&self, command: u8) {
-        self.data.write(command)
+        self.command.write(command)
     }
 
     pub fn read_data(&self) -> u8 {
@@ -83,13 +85,18 @@ impl ChainedPics {
         }
     }
 
+    pub fn disable(&self) {
+        // mask every single interrupt
+        self.master.write_data(0xff);
+        self.slave.write_data(0xff);
+    }
+
     // https://wiki.osdev.org/8259_PIC
     // default configuration of the PIC is not usable because it sends interrupt
     // vector numbers in the range of 0–15 to the CPU. These however are already
     // occupied by exceptions. Therefore we need to remap PIC interrupts to
     // different numbers
     pub fn init(&mut self, master_offset: u8, slave_offset: u8) {
-        println!("Initializing PIC {} {}", master_offset, slave_offset);
         // save masks
         // (When no command is issued, the data port allows us to access the interrupt mask of the 8259 PIC. )
         let master_mask = self.master.read_data();

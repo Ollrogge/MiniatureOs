@@ -77,7 +77,7 @@ where
             // entry.offset if relative to virtual base, so we need to first map
             // the page corresponding to virtual base to its physical frame and then
             // calculate the correct offset
-            let frame = self
+            let (frame, _) = self
                 .page_table
                 .translate(page)
                 .expect("Relative relocation: Failed to translate to frame");
@@ -112,7 +112,74 @@ where
             bytes_written += bytes_to_write;
         }
     }
+
+    // Initially the bootloader loads the plain kernel binary into physical memory.
+    // The binary image does not contain the NOBITS sections (such as .bss). However,
+    // these sections need to be initialized when loading the ELF.
+    //
+    // Due to this, the following can happen if we map the ELF into virtual memory and
+    // the sections are not exactly page aligned:
+    //
+    // Elf binary: <  f1  >
+    //             <s1><s2>
+    //
+    // In memory:  <s1><nobits1><s2>
+    //
+    // Section s1 and section s2 got read into the same frame initially, however
+    // when the ELF is loaded, there is a NOBITS section after section s1.
+    // As a result, we need to make a copy of the frame before we can mutate it
+    // and write zeros to the nobits section. Otherwise we would overwrite s2.
+    //
+    // When this function is called the frame f1 has already been mapped to two pages.
+    // E.g.:
+    // s1: Map: 214000 -> 0xffffffff80015000 (p_n)
+    // s2: Map: 214000 -> 0xffffffff80016000 (p_n+1)
+    //
+    // To handle this we allocate a new frame f2, copy the contents of f1 to it,
+    // unmap page p_n+1 and remap it to the new frame.
+    // We can then freely write to f2 without overwriting s2, since the initial
+    // mapping to f1 is still intact.
+    //
+    unsafe fn make_mutable(&mut self, page: Page) -> PhysicalFrame {
+        let (frame, flags) = self
+            .page_table
+            .translate(page)
+            .expect("Make mutable translation failed");
+
+        if flags.contains(COPIED) {
+            return frame;
+        }
+
+        let new_frame = self
+            .frame_allocator
+            .allocate_frame()
+            .expect("Failed to allocate frame for make_mut");
+
+        let frame_ptr = frame.start() as *const u8;
+        let new_frame_ptr = new_frame.start() as *mut u8;
+        let new_flags = flags | COPIED;
+
+        unsafe {
+            ptr::copy_nonoverlapping(frame_ptr, new_frame_ptr, Size4KiB::SIZE as usize);
+        }
+
+        let (_, flusher) = self
+            .page_table
+            .unmap(page)
+            .expect("Failed to unmap page in make_mutable");
+
+        flusher.ignore();
+
+        self.page_table
+            .map_to(new_frame, page, new_flags, self.frame_allocator)
+            .expect("make mut: failed to map page to new frame")
+            .flush();
+
+        new_frame
+    }
 }
+
+const COPIED: PageTableEntryFlags = PageTableEntryFlags::BIT_9;
 
 impl<'a, M, A> ElfLoader for KernelLoader<'a, M, A>
 where
@@ -149,18 +216,6 @@ where
                 flags |= PageTableEntryFlags::WRITABLE;
             }
 
-            // TODO: the approach of loading the kernel elf and binary blob into
-            // memory has a potential security problem: This way different segments
-            // can share a physical frame. When mapped to a page with permissions,
-            // the page will then contain data of another segment with different
-            // permissions
-            //
-            // To fix this, one would need to allocate explicit frames in this
-            // section for each segment.
-            //
-            // Cant get around the loading binary blob into memory thing for now ig,
-            // since we only have access to BIOS disk firmware in lower stages
-
             // Map section into memory
             for frame in PhysicalFrame::range_inclusive(start_frame, end_frame) {
                 let frame_offset = frame - start_frame;
@@ -186,35 +241,38 @@ where
             if header.mem_size() > header.file_size() {
                 // take header virtual address NOT page, since page is aligned down
                 let zero_start = virtual_start_address + header.file_size();
-                let zero_end = virtual_start_address + header.mem_size() - 1u64;
+                let zero_end = virtual_start_address + header.mem_size();
 
                 // Special case: last non-bss frame of the segment consists partly
                 // of data and partly of bss memory, which must be zeroed. Therefore we need
                 // to be careful to only zero part of the frame
-                let data_bytes_before_zero = zero_start.as_u64() & 0xfff;
+                let data_bytes_before_zero = zero_start.as_u64() & (Size4KiB::SIZE - 1);
+                println!(
+                    "Data bytes before zero: bytes_before_zero:{} header_mem_size:{} header_file_size:{}",
+                    data_bytes_before_zero,
+                    header.mem_size(),
+                    header.file_size()
+                );
                 if data_bytes_before_zero != 0 {
                     let last_page = Page::<Size4KiB>::containing_address(
                         virtual_start_address + header.file_size() - 1u64,
                     );
 
-                    let last_frame = self
-                        .page_table
-                        .translate(last_page)
-                        .expect("Elf load .bss: failed to translate page to frame");
-
-                    let ptr = last_frame.start() as *mut u8;
+                    let last_frame = unsafe { self.make_mutable(last_page) };
 
                     unsafe {
+                        let ptr =
+                            (last_frame.start() as *mut u8).add(data_bytes_before_zero as usize);
                         core::ptr::write_bytes(
-                            ptr.add(data_bytes_before_zero as usize),
-                            0,
+                            ptr,
+                            0x0,
                             (Size4KiB::SIZE - data_bytes_before_zero) as usize,
                         )
                     }
                 }
 
                 let start_page = Page::containing_address(zero_start.align_up(Size4KiB::SIZE));
-                let end_page = Page::containing_address(zero_end);
+                let end_page = Page::containing_address(zero_end - 1u64);
                 /*
                 println!(
                     "Aligned: {:#x} {:#x} {:#x} {} {} {:#x} {:#x} {:#x}",

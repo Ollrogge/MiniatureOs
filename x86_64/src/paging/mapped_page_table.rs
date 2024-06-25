@@ -4,7 +4,7 @@ use crate::{
     },
     paging::{
         Mapper, MappingError, PageTable, PageTableEntry, PageTableEntryFlags, TlbFlusher,
-        TranslationError, Translator,
+        TranslationError, Translator, UnmappingError,
     },
     println,
 };
@@ -65,7 +65,7 @@ impl<P: PageTableFrameMapping> PageTableWalker<P> {
             table
         } else {
             if !flags.is_empty() && !pagetable_entry.flags().contains(flags) {
-                pagetable_entry.set_flags(pagetable_entry.flags() | flags);
+                pagetable_entry.add_flags(flags);
             }
 
             let virtual_address = self
@@ -78,14 +78,19 @@ impl<P: PageTableFrameMapping> PageTableWalker<P> {
         Some(table)
     }
 
-    pub fn get_pagetable<'a>(&self, pagetable_entry: &'a PageTableEntry) -> Option<&'a PageTable> {
-        if !pagetable_entry.is_unused() {
-            let virtual_address = self
-                .page_table_frame_mapping
-                .frame_to_virtual(pagetable_entry.physical_frame());
-            Some(unsafe { PageTable::at_address(virtual_address) })
-        } else {
-            None
+    pub fn get_pagetable<'a>(
+        &self,
+        pagetable_entry: &'a PageTableEntry,
+    ) -> Option<&'a mut PageTable> {
+        match pagetable_entry.is_unused() {
+            true => None,
+            false => {
+                let virtual_address = self
+                    .page_table_frame_mapping
+                    .frame_to_virtual(pagetable_entry.physical_frame());
+
+                unsafe { Some(PageTable::at_address(virtual_address)) }
+            }
         }
     }
 }
@@ -139,6 +144,39 @@ impl<'a, P: PageTableFrameMapping> Mapper<Size4KiB> for MappedPageTable<'a, P> {
             Ok(TlbFlusher::new(page))
         }
     }
+
+    fn unmap(
+        &mut self,
+        page: Page<Size4KiB>,
+    ) -> Result<(PhysicalFrame<Size4KiB>, TlbFlusher<Size4KiB>), UnmappingError> {
+        let l4 = &mut self.pml4t;
+        let l3 = self
+            .walker
+            .get_pagetable(&mut l4[page.address.l4_index()])
+            .unwrap();
+        let l2 = self
+            .walker
+            .get_pagetable(&mut l3[page.address.l3_index()])
+            .unwrap();
+
+        let l1 = self
+            .walker
+            .get_pagetable(&mut l2[page.address.l2_index()])
+            .unwrap();
+
+        let pte = &mut l1[page.address().l1_index()];
+
+        if !pte.flags().contains(PageTableEntryFlags::PRESENT) {
+            return Err(UnmappingError::PageNotMapped);
+        }
+
+        pte.set_unused();
+
+        Ok((
+            PhysicalFrame::containing_address(pte.address()),
+            TlbFlusher::new(page),
+        ))
+    }
 }
 
 impl<'a, P: PageTableFrameMapping> Mapper<Size2MiB> for MappedPageTable<'a, P> {
@@ -182,10 +220,41 @@ impl<'a, P: PageTableFrameMapping> Mapper<Size2MiB> for MappedPageTable<'a, P> {
             Ok(TlbFlusher::new(page))
         }
     }
+
+    fn unmap(
+        &mut self,
+        page: Page<Size2MiB>,
+    ) -> Result<(PhysicalFrame<Size2MiB>, TlbFlusher<Size2MiB>), UnmappingError> {
+        let l4 = &mut self.pml4t;
+        let l3 = self
+            .walker
+            .get_pagetable(&mut l4[page.address.l4_index()])
+            .unwrap();
+        let l2 = self
+            .walker
+            .get_pagetable(&mut l3[page.address.l3_index()])
+            .unwrap();
+
+        let pte = &mut l2[page.address.l2_index()];
+
+        if !pte.flags().contains(PageTableEntryFlags::PRESENT) {
+            return Err(UnmappingError::PageNotMapped);
+        }
+
+        pte.set_unused();
+
+        Ok((
+            PhysicalFrame::containing_address(pte.address()),
+            TlbFlusher::new(page),
+        ))
+    }
 }
 
 impl<'a, P: PageTableFrameMapping> Translator<Size4KiB> for MappedPageTable<'a, P> {
-    fn translate(&self, page: Page<Size4KiB>) -> Result<PhysicalFrame<Size4KiB>, TranslationError> {
+    fn translate(
+        &self,
+        page: Page<Size4KiB>,
+    ) -> Result<(PhysicalFrame<Size4KiB>, PageTableEntryFlags), TranslationError> {
         let l4 = &self.pml4t;
         let l3 = self
             .walker
@@ -203,7 +272,10 @@ impl<'a, P: PageTableFrameMapping> Translator<Size4KiB> for MappedPageTable<'a, 
         let pte = &l1[page.address.l1_index()];
 
         if pte.is_present() {
-            Ok(PhysicalFrame::containing_address(pte.address()))
+            Ok((
+                PhysicalFrame::containing_address(pte.address()),
+                pte.flags(),
+            ))
         } else {
             Err(TranslationError::NotMapped)
         }
@@ -211,7 +283,10 @@ impl<'a, P: PageTableFrameMapping> Translator<Size4KiB> for MappedPageTable<'a, 
 }
 
 impl<'a, P: PageTableFrameMapping> Translator<Size2MiB> for MappedPageTable<'a, P> {
-    fn translate(&self, page: Page<Size2MiB>) -> Result<PhysicalFrame<Size2MiB>, TranslationError> {
+    fn translate(
+        &self,
+        page: Page<Size2MiB>,
+    ) -> Result<(PhysicalFrame<Size2MiB>, PageTableEntryFlags), TranslationError> {
         let l4 = &self.pml4t;
         let l3 = self
             .walker
@@ -225,7 +300,10 @@ impl<'a, P: PageTableFrameMapping> Translator<Size2MiB> for MappedPageTable<'a, 
         let pte = &l2[page.address.l2_index()];
 
         if pte.is_present() {
-            Ok(PhysicalFrame::containing_address(pte.address()))
+            Ok((
+                PhysicalFrame::containing_address(pte.address()),
+                pte.flags(),
+            ))
         } else {
             Err(TranslationError::NotMapped)
         }
