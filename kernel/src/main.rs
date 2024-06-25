@@ -11,7 +11,7 @@ use kernel::{
     kernel_init,
 };
 use x86_64::{
-    instructions::int3,
+    instructions::{hlt, int3},
     memory::{MemoryRegion, PhysicalMemoryRegion},
     mutex::MutexGuard,
     println,
@@ -150,6 +150,12 @@ fn test_heap_allocations() {
     }
 }
 
+fn hlt_loop() -> ! {
+    loop {
+        hlt();
+    }
+}
+
 fn start(info: &'static BootInfo) -> ! {
     println!("Hello from kernel <3");
 
@@ -158,7 +164,6 @@ fn start(info: &'static BootInfo) -> ! {
     let (frame_allocator, page_table) =
         kernel_init(info).expect("Error while trying to initialize kernel");
     println!("Kernel initialized");
-    loop {}
 
     unsafe { test_buddy_allocator() };
     println!("Buddy allocator tested");
@@ -168,10 +173,7 @@ fn start(info: &'static BootInfo) -> ! {
 
     trigger_int3();
 
+    hlt_loop();
     //trigger_page_fault();
-    loop {}
-
-    stack_overflow();
-
-    loop {}
+    //stack_overflow();
 }

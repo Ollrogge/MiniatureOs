@@ -148,3 +148,14 @@ impl fmt::Debug for ExceptionStackFrame {
         write!(f, "}}")
     }
 }
+
+pub fn without_interrupts<F, R>(c: F) -> R
+where
+    F: FnOnce() -> R,
+{
+    unsafe { disable() };
+    let ret = c();
+    unsafe { enable() };
+
+    ret
+}

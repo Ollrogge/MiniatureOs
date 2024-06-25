@@ -12,7 +12,9 @@ use x86_64::{
     interrupts::{self, ExceptionStackFrame, PageFaultErrorCode},
     memory::{Address, PageSize, Size4KiB, VirtualAddress},
     mutex::Mutex,
-    pop_scratch_registers, print, println, push_scratch_registers,
+    pop_scratch_registers,
+    port::Port,
+    print, println, push_scratch_registers,
     register::{CS, DS, ES, SS},
     tss::{TaskStateSegment, DOUBLE_FAULT_IST_IDX},
 };
@@ -27,6 +29,7 @@ static PICS: Mutex<ChainedPics> = Mutex::new(ChainedPics::new());
 #[repr(u8)]
 pub enum InterruptIndex {
     Timer = 0,
+    Keyboard,
 }
 
 impl InterruptIndex {
@@ -87,6 +90,9 @@ lazy_static! {
 
             idt.interrupts[InterruptIndex::Timer.as_usize()]
                 .set_handler_function(handler_without_error_code!(timer_interrupt_handler));
+
+            idt.interrupts[InterruptIndex::Keyboard.as_usize()]
+                .set_handler_function(handler_without_error_code!(keyboard_interrupt_handler));
         }
 
         idt
@@ -235,4 +241,13 @@ extern "C" fn timer_interrupt_handler(_frame: &ExceptionStackFrame) {
     print!(".");
     PICS.lock()
         .notify_end_of_interrupt(InterruptIndex::Timer.as_remapped_idt_number());
+}
+
+extern "C" fn keyboard_interrupt_handler(_frame: &ExceptionStackFrame) {
+    let mut port = Port::new(0x60);
+    let scancode: u8 = unsafe { port.read() };
+    print!("{}", scancode);
+
+    PICS.lock()
+        .notify_end_of_interrupt(InterruptIndex::Keyboard.as_remapped_idt_number());
 }

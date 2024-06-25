@@ -15,3 +15,7 @@ pub fn flush_tlb(address: VirtualAddress) {
         asm!("invlpg [{0}]", in(reg) address.as_u64() as usize, options(nostack, preserves_flags))
     }
 }
+
+pub fn hlt() {
+    unsafe { asm!("hlt", options(nostack, nomem, preserves_flags)) }
+}

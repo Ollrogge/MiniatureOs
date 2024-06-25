@@ -147,7 +147,7 @@ impl ChainedPics {
     // Signal to PIC that we are done and ready to receive next interrupt.
     // Else PIC won't signal another interrupt
     pub fn notify_end_of_interrupt(&self, irq_number: u8) {
-        if irq_number >= 8 {
+        if irq_number >= 0x8 {
             self.slave.write_command(Commands::EndOfInterrupt as u8);
         }
 
