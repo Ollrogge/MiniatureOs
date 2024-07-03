@@ -1,7 +1,7 @@
 use core::fmt::{self, Write};
 use lazy_static::lazy_static;
 use util::{mutex::Mutex, volatile::Volatile};
-use x86_64::interrupts::without_interrupts;
+use x86_64::interrupts;
 
 const VGA_BUFFER_ADDRESS: u64 = 0xb8000;
 // https://wiki.osdev.org/Text_UI
@@ -64,7 +64,6 @@ const BUFFER_HEIGHT: usize = 25;
 const BUFFER_WIDTH: usize = 80;
 
 /// A structure representing the VGA text buffer.
-#[repr(transparent)]
 struct Buffer {
     chars: [[Volatile<ScreenChar>; BUFFER_WIDTH]; BUFFER_HEIGHT],
 }
@@ -168,7 +167,7 @@ macro_rules! println {
 /// through the global `WRITER` instance.
 #[doc(hidden)]
 pub fn _print(args: fmt::Arguments) {
-    without_interrupts(|| {
+    interrupts::without_interrupts(|| {
         WRITER.lock().write_fmt(args).unwrap();
     });
 }

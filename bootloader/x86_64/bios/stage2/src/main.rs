@@ -143,9 +143,9 @@ fn start(disk_number: u16, partition_table_start: *const u8) -> ! {
         .expect("Unable to get vesa mode");
     let mode_info = vesa::VbeModeInfo::get(mode).expect("Failed to get vesa mode info");
 
+    // TODO: implement propert vga_support
     // println wont work anymore after this call
-    // TODO: forgot why
-    vesa_info.set_mode(mode).expect("Failed to set vesa mode");
+    //vesa_info.set_mode(mode).expect("Failed to set vesa mode");
 
     let mut bios_info = BIOS_INFO.lock();
     bios_info.stage4 = PhysicalMemoryRegion::new(

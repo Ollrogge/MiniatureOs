@@ -1,7 +1,10 @@
 use core::fmt;
 use lazy_static::lazy_static;
 use util::mutex::Mutex;
-use x86_64::uart::*;
+use x86_64::{
+    interrupts::{self},
+    uart::*,
+};
 
 lazy_static! {
     pub static ref SERIAL: Mutex<SerialPort> = {
@@ -15,7 +18,12 @@ lazy_static! {
 pub fn _print(args: fmt::Arguments) {
     use core::fmt::Write;
 
-    SERIAL.lock().write_fmt(args).unwrap();
+    interrupts::without_interrupts(|| {
+        SERIAL
+            .lock()
+            .write_fmt(args)
+            .expect("Printing to serial failed");
+    })
 }
 
 #[macro_export]
@@ -26,12 +34,5 @@ macro_rules! serial_print {
 #[macro_export]
 macro_rules! serial_println {
     () => ($crate::print!("\n"));
-    ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)));
-}
-
-#[macro_export]
-macro_rules! const_assert {
-    ($($tt:tt)*) => {
-        const _: () = assert!($($tt)*);
-    }
+    ($($arg:tt)*) => ($crate::serial_print!("{}\n", format_args!($($arg)*)));
 }

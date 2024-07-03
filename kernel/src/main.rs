@@ -8,7 +8,7 @@ use kernel::{
     allocator::{
         buddy_allocator::BuddyAllocator, init_heap, Locked, ALLOCATOR, HEAP_SIZE, HEAP_START,
     },
-    kernel_init, println, serial_println,
+    interrupts, kernel_init, println, serial_println,
 };
 use x86_64::{
     instructions::{hlt, int3},
@@ -33,7 +33,7 @@ pub extern "C" fn _start(info: &'static BootInfo) -> ! {
 
 fn print_memory_map(map: &PhysicalMemoryRegions) {
     for region in map.iter() {
-        println!(
+        serial_println!(
             "Memory region, start: {:#x}, length: {:#x}, usable: {}",
             region.start,
             region.size,
@@ -156,7 +156,10 @@ fn hlt_loop() -> ! {
 
 fn start(info: &'static BootInfo) -> ! {
     //println!("Hello from kernel <3");
+    interrupts::init();
     serial_println!("Hello from kernel");
+
+    loop {}
 
     print_memory_map(&info.memory_regions);
 

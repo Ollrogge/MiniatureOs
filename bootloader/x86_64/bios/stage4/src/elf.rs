@@ -145,41 +145,38 @@ where
             .translate(page)
             .expect("Make mutable translation failed");
 
-        println!(
-            "Make mutable: copied?: {}, frame_start: {:#x}, page: {:#x}",
-            flags.contains(COPIED),
-            frame.start(),
-            page.start()
-        );
-
-        if flags.contains(COPIED) {
-            return frame;
-        }
-
         let new_frame = self
             .frame_allocator
             .allocate_frame()
             .expect("Failed to allocate frame for make_mut");
 
+        /*
+        println!(
+            "Make mutable: copied?: {}, frame_start: {:#x}, page: {:#x}, new frame: {:#x}",
+            flags.contains(COPIED),
+            frame.start(),
+            page.start(),
+            new_frame.start()
+        );
+        */
+
         let frame_ptr = frame.start() as *const u8;
         let new_frame_ptr = new_frame.start() as *mut u8;
-        let new_flags = flags | COPIED;
 
         unsafe {
             ptr::copy_nonoverlapping(frame_ptr, new_frame_ptr, Size4KiB::SIZE as usize);
         }
 
-        let (_, flusher) = self
-            .page_table
+        self.page_table
             .unmap(page)
-            .expect("Failed to unmap page in make_mutable");
-
-        flusher.ignore();
+            .expect("Failed to unmap page in make_mutable")
+            .1
+            .ignore();
 
         self.page_table
-            .map_to(new_frame, page, new_flags, self.frame_allocator)
+            .map_to(new_frame, page, flags, self.frame_allocator)
             .expect("make mut: failed to map page to new frame")
-            .flush();
+            .ignore();
 
         new_frame
     }
@@ -228,12 +225,14 @@ where
                 // 1:1 mapping
                 let page = start_page + frame_offset;
 
+                /*
                 println!(
                     "Map: {:x} -> {:x} {}",
                     frame.start(),
                     page.start(),
                     frame_offset
                 );
+                */
 
                 self.page_table
                     .map_to(frame, page, flags, self.frame_allocator)
@@ -251,12 +250,14 @@ where
                 // of data and partly of bss memory, which must be zeroed. Therefore we need
                 // to be careful to only zero part of the frame
                 let data_bytes_before_zero = zero_start.as_u64() & (Size4KiB::SIZE - 1);
+                /*
                 println!(
                     "Data bytes before zero: bytes_before_zero: {} header_mem_size: {} header_file_size: {}",
                     data_bytes_before_zero,
                     header.mem_size(),
                     header.file_size()
                 );
+                */
                 if data_bytes_before_zero != 0 {
                     let last_page = Page::<Size4KiB>::containing_address(
                         virtual_start_address + header.file_size() - 1u64,
@@ -267,6 +268,7 @@ where
                     unsafe {
                         let ptr =
                             (last_frame.start() as *mut u8).add(data_bytes_before_zero as usize);
+
                         core::ptr::write_bytes(
                             ptr,
                             0x0,

@@ -1,4 +1,4 @@
-use crate::{print, println};
+use crate::{print, println, serial_print, serial_println};
 use bitflags::bitflags;
 use core::{
     arch::asm,
@@ -247,7 +247,6 @@ extern "C" fn timer_interrupt_handler(_frame: &ExceptionStackFrame) {
 extern "C" fn keyboard_interrupt_handler(_frame: &ExceptionStackFrame) {
     let mut port = Port::new(0x60);
     let scancode: u8 = unsafe { port.read() };
-    print!("{}", scancode);
 
     PICS.lock()
         .notify_end_of_interrupt(InterruptIndex::Keyboard.as_remapped_idt_number());
