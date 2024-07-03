@@ -2,7 +2,6 @@ use api::BootInfo;
 use x86_64::{
     memory::{Address, VirtualAddress},
     paging::PageTable,
-    println,
     register::Cr3,
 };
 

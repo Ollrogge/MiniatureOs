@@ -11,13 +11,13 @@ use x86_64::{
         bump_frame_allocator::BumpFrameAllocator,
         offset_page_table::{OffsetPageTable, PhysicalOffset},
     },
-    println,
 };
 
 pub mod allocator;
 pub mod interrupts;
 pub mod paging;
 pub mod qemu;
+pub mod serial;
 
 use allocator::init_heap;
 

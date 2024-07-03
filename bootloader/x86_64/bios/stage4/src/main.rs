@@ -13,7 +13,7 @@ mod elf;
 mod interrupts;
 use crate::elf::KernelLoader;
 use api::{BootInfo, PhysicalMemoryRegions};
-use common::{hlt, BiosInfo, E820MemoryRegion};
+use common::{hlt, println, BiosInfo, E820MemoryRegion};
 use core::alloc::Layout;
 use x86_64::{
     gdt::{self, SegmentDescriptor},
@@ -27,7 +27,6 @@ use x86_64::{
         offset_page_table::{OffsetPageTable, PhysicalOffset},
         Mapper, MapperAllSizes, PageTable, PageTableEntryFlags,
     },
-    println,
     register::{Cr0, Cr0Flags, Efer, EferFlags},
 };
 

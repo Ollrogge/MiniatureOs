@@ -1,11 +1,12 @@
 // Populate IDT for easier debugging of crashes in the bootloader
+use common::println;
 use core::arch::asm;
 use lazy_static::lazy_static;
 use x86_64::{
     handler_with_error_code, handler_without_error_code,
     idt::InterruptDescriptorTable,
     interrupts::{ExceptionStackFrame, PageFaultErrorCode},
-    pop_scratch_registers, println, push_scratch_registers,
+    pop_scratch_registers, push_scratch_registers,
 };
 
 lazy_static! {

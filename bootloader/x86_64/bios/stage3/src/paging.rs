@@ -8,12 +8,12 @@
 //!
 //! PML4T -> PDPT -> PDT -> PT
 
+use common::println;
 use core::{arch::asm, borrow::BorrowMut, ops::DerefMut, slice};
+use util::mutex::Mutex;
 use x86_64::{
     memory::{GIB, MIB},
-    mutex::Mutex,
     paging::{PageTable, PageTableEntry, PageTableEntryFlags},
-    println,
 };
 
 static PML4T: Mutex<PageTable> = Mutex::new(PageTable::empty());

@@ -1,13 +1,12 @@
 use buddy_allocator::BuddyAllocator;
 use core::ops::Add;
+use util::mutex::{Mutex, MutexGuard};
 /*
 use bump allocator for frame allocations for now. Only handle frame deallocations later
 */
 use x86_64::{
     memory::{FrameAllocator, Page, Size4KiB, VirtualAddress},
-    mutex::{Mutex, MutexGuard},
     paging::{Mapper, PageTableEntryFlags},
-    println,
 };
 
 pub mod buddy_allocator;

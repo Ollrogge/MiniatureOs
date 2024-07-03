@@ -56,3 +56,13 @@
 + write a logger that can be enabled per module, similar to RIOTS DEBUG macro
 
 + implement the MapperFlush functionality also in bootloader, to be forced to flush tlb later
+
+**Threads / Processes**
++ implement a way to start kernel threads
++ implement processes only for user space / kernel modules
++ https://wiki.osdev.org/Brendan%27s_Multi-tasking_Tutorial
++ https://wiki.osdev.org/Context_Switching
++ Save Context: Push registers onto the stack or save them in the thread's context structure.
++ Switch Stack: Change the stack pointer (ESP) to the new thread's stack.
++ Restore Context: Pop registers from the new thread's stack or restore them from the thread's context structure.
++ Return: Use iret to restore the instruction pointer (EIP) and continue execution.

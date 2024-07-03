@@ -10,3 +10,8 @@ bitflags = "*"
 bit_field = "*"
 x86_64 = {path="../../../../x86_64"}
 api = {path="../../../api"}
+util = {path="../../../../util"}
+
+[dependencies.lazy_static]
+version = "*"
+features = ["spin_no_std"]

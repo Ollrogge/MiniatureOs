@@ -1,4 +1,4 @@
-use common::BiosInfo;
+use common::{println, BiosInfo};
 use core::{cmp, marker::PhantomData, mem, ops::Add, ptr, slice};
 use elfloader::{arch::x86_64::RelocationTypes, *};
 use x86_64::{
@@ -10,7 +10,6 @@ use x86_64::{
         mapped_page_table::MappedPageTable, Mapper, MapperAllSizes, PageTable, PageTableEntryFlags,
         Translator, TranslatorAllSizes,
     },
-    println,
 };
 
 // TODO: move this functionality to a more general util crate since I will

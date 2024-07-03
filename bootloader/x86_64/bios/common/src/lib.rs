@@ -2,17 +2,12 @@
 #![no_main]
 use api::FramebufferInfo;
 use core::{arch::asm, mem::size_of};
+use util::const_assert;
 use x86_64::memory::{MemoryRegion, PhysicalMemoryRegion, PhysicalMemoryRegionType};
 
 pub mod mbr;
 pub mod realmode;
-
-#[macro_export]
-macro_rules! const_assert {
-    ($($tt:tt)*) => {
-        const _: () = assert!($($tt)*);
-    }
-}
+pub mod serial;
 
 pub fn hlt() {
     unsafe {

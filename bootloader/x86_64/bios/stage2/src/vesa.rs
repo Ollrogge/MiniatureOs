@@ -7,8 +7,9 @@
 //! beyond the VGA hardware standard
 use crate::println;
 use api::{FramebufferInfo, PixelFormat};
-use common::{const_assert, realmode::RealModePointer};
+use common::realmode::RealModePointer;
 use core::{arch::asm, borrow::BorrowMut, default::Default, mem::size_of};
+use util::const_assert;
 use x86_64::memory::{PhysicalMemoryRegion, PhysicalMemoryRegionType};
 
 /// All VESA functions return 0x4F in AL if they are supported and use AH as a

@@ -6,7 +6,6 @@ use crate::{
         Mapper, MappingError, PageTable, PageTableEntry, PageTableEntryFlags, TlbFlusher,
         TranslationError, Translator, UnmappingError,
     },
-    println,
 };
 use core::ops::Add;
 /// Provides a virtual address mapping for physical page table frames.

@@ -8,13 +8,11 @@ use kernel::{
     allocator::{
         buddy_allocator::BuddyAllocator, init_heap, Locked, ALLOCATOR, HEAP_SIZE, HEAP_START,
     },
-    kernel_init,
+    kernel_init, println,
 };
 use x86_64::{
     instructions::{hlt, int3},
     memory::{MemoryRegion, PhysicalMemoryRegion},
-    mutex::MutexGuard,
-    println,
     register::Cr0,
 };
 
@@ -167,6 +165,8 @@ fn start(info: &'static BootInfo) -> ! {
 
     unsafe { test_buddy_allocator() };
     println!("Buddy allocator tested");
+
+    println!("Framebuffer info: {:#x}", info.framebuffer.region.start());
 
     test_heap_allocations();
     println!("Heap tested");

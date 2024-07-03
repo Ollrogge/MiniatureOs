@@ -5,13 +5,10 @@
 //!     - Segment registers are now interpreted as indexes into the GDT (bits 3-15)
 #![no_std]
 #![no_main]
-use common::{hlt, BiosInfo};
+use common::{hlt, println, BiosInfo};
 use core::{arch::asm, panic::PanicInfo};
 use lazy_static::lazy_static;
-use x86_64::{
-    gdt::{GlobalDescriptorTable, SegmentDescriptor},
-    println,
-};
+use x86_64::gdt::{GlobalDescriptorTable, SegmentDescriptor};
 
 mod paging;
 

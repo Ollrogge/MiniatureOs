@@ -1,8 +1,8 @@
 //! This module is responsible for detecting available memory using x86 BIOS
 //! functions
 use common::E820MemoryRegion;
-use core::{arch::asm, convert::AsRef, mem::size_of};
-use x86_64::mutex::{Mutex, MutexGuard};
+use core::{arch::asm, mem::size_of};
+use util::mutex::{Mutex, MutexGuard};
 
 pub static MEMORY_MAP: Mutex<MemoryMap> = Mutex::new(MemoryMap {
     map: [E820MemoryRegion::empty(); 0x20],

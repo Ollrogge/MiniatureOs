@@ -2,8 +2,7 @@
 #![no_main]
 use api::BootInfo;
 use core::panic::PanicInfo;
-use kernel::{kernel_init, qemu};
-use x86_64::println;
+use kernel::{kernel_init, println, qemu};
 
 #[panic_handler]
 pub fn panic(info: &PanicInfo) -> ! {

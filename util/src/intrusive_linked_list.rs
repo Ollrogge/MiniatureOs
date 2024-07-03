@@ -5,7 +5,6 @@
 //! In usual linked lists the list contains a data pointer to the data
 //!
 use core::{mem::offset_of, ptr::NonNull};
-use std::collections::LinkedList;
 
 macro_rules! container_of {
     ($ptr:expr, $type:path, $member:ident) => {

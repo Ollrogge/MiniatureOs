@@ -25,10 +25,7 @@
 //!
 //!
 use core::arch::asm;
-use x86_64::{
-    port::{io_wait, Port},
-    println,
-};
+use x86_64::port::{io_wait, Port};
 
 #[repr(u8)]
 enum InitialisationWord1 {

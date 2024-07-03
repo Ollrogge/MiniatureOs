@@ -7,3 +7,4 @@ edition = "2021"
 bitflags = "*"
 bit_field = "*"
 lazy_static = "*"
+util = {path="../util"}

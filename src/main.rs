@@ -7,6 +7,7 @@ fn main() {
     cmd.arg("-drive")
         .arg(format!("format=raw,file={bios_path}"));
     cmd.arg("-no-reboot");
+    cmd.arg("-nographic");
     cmd.arg("-monitor").arg("/dev/null");
     if env::consts::OS == "linux" {
         cmd.arg("-enable-kvm");

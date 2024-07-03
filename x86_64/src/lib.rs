@@ -6,13 +6,14 @@ pub mod idt;
 pub mod instructions;
 pub mod interrupts;
 pub mod memory;
-pub mod mutex;
 pub mod paging;
 pub mod port;
-pub mod print;
 pub mod register;
 pub mod tss;
 pub mod uart;
+
+// just for debugging
+mod serial;
 
 use core::convert::From;
 

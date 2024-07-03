@@ -1,9 +1,11 @@
+use crate::{print, println};
 use bitflags::bitflags;
 use core::{
     arch::asm,
     fmt::{self, Debug},
 };
 use lazy_static::lazy_static;
+use util::mutex::Mutex;
 use x86_64::{
     gdt::{GlobalDescriptorTable, SegmentDescriptor, SegmentSelector},
     handler_with_error_code, handler_without_error_code,
@@ -11,10 +13,9 @@ use x86_64::{
     instructions::int3,
     interrupts::{self, ExceptionStackFrame, PageFaultErrorCode},
     memory::{Address, PageSize, Size4KiB, VirtualAddress},
-    mutex::Mutex,
     pop_scratch_registers,
     port::Port,
-    print, println, push_scratch_registers,
+    push_scratch_registers,
     register::{CS, DS, ES, SS},
     tss::{TaskStateSegment, DOUBLE_FAULT_IST_IDX},
 };

@@ -12,20 +12,19 @@
 //!
 #![no_std]
 #![no_main]
-use common::{fail, hlt, mbr, BiosInfo, E820MemoryRegion};
+use common::{fail, hlt, mbr, println, BiosInfo, E820MemoryRegion};
 use core::{panic::PanicInfo, slice};
 use lazy_static::lazy_static;
+use util::mutex::Mutex;
 use x86_64::{
     gdt::{GlobalDescriptorTable, SegmentDescriptor},
     memory::{MemoryRegion, PhysicalMemoryRegion, PhysicalMemoryRegionType},
-    mutex::Mutex,
 };
 
 mod dap;
 mod disk;
 mod fat;
 mod memory_map;
-mod print;
 mod protected_mode;
 mod vesa;
 use memory_map::MemoryMap;
