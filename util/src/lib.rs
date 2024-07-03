@@ -1,6 +1,7 @@
 #![no_std]
 pub mod intrusive_linked_list;
 pub mod mutex;
+pub mod volatile;
 
 #[macro_export]
 macro_rules! const_assert {

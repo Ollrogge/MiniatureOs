@@ -8,7 +8,7 @@ use kernel::{
     allocator::{
         buddy_allocator::BuddyAllocator, init_heap, Locked, ALLOCATOR, HEAP_SIZE, HEAP_START,
     },
-    kernel_init, println,
+    kernel_init, println, serial_println,
 };
 use x86_64::{
     instructions::{hlt, int3},
@@ -155,7 +155,8 @@ fn hlt_loop() -> ! {
 }
 
 fn start(info: &'static BootInfo) -> ! {
-    println!("Hello from kernel <3");
+    //println!("Hello from kernel <3");
+    serial_println!("Hello from kernel");
 
     print_memory_map(&info.memory_regions);
 

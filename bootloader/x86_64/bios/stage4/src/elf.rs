@@ -145,6 +145,13 @@ where
             .translate(page)
             .expect("Make mutable translation failed");
 
+        println!(
+            "Make mutable: copied?: {}, frame_start: {:#x}, page: {:#x}",
+            flags.contains(COPIED),
+            frame.start(),
+            page.start()
+        );
+
         if flags.contains(COPIED) {
             return frame;
         }
@@ -221,14 +228,12 @@ where
                 // 1:1 mapping
                 let page = start_page + frame_offset;
 
-                /*
                 println!(
                     "Map: {:x} -> {:x} {}",
                     frame.start(),
                     page.start(),
                     frame_offset
                 );
-                */
 
                 self.page_table
                     .map_to(frame, page, flags, self.frame_allocator)
@@ -247,7 +252,7 @@ where
                 // to be careful to only zero part of the frame
                 let data_bytes_before_zero = zero_start.as_u64() & (Size4KiB::SIZE - 1);
                 println!(
-                    "Data bytes before zero: bytes_before_zero:{} header_mem_size:{} header_file_size:{}",
+                    "Data bytes before zero: bytes_before_zero: {} header_mem_size: {} header_file_size: {}",
                     data_bytes_before_zero,
                     header.mem_size(),
                     header.file_size()

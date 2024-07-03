@@ -165,7 +165,7 @@ pub trait Address {
 pub struct PhysicalAddress(u64);
 
 impl PhysicalAddress {
-    pub fn new(address: u64) -> Self {
+    pub const fn new(address: u64) -> Self {
         Self(address)
     }
 

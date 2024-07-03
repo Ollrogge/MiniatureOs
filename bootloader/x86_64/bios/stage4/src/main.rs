@@ -34,6 +34,7 @@ use x86_64::{
 const KERNEL_VIRTUAL_BASE: u64 = 0xffffffff80000000;
 const KERNEL_STACK_TOP: u64 = 0xffffffff00000000;
 const KERNEL_STACK_SIZE: u64 = 128 * KIB;
+const VGA_BUFFER_ADDRESS: PhysicalAddress = PhysicalAddress::new(0xb8000);
 // map the complete physical address space at this offset in order to enable
 // the kernel to easily access the page table
 // https://os.phil-opp.com/paging-implementation/#map-at-a-fixed-offset
@@ -288,7 +289,7 @@ where
 }
 
 // Map the complete physical address space at an offset into kernel memory space
-fn map_complete_physical_memory_space_into_kernel<A, M>(
+fn map_complete_physical_memory_space_at_an_offset_into_kernel<A, M>(
     frame_allocator: &mut A,
     page_table: &mut M,
     highest_physical_address: PhysicalAddress,
@@ -387,7 +388,17 @@ fn start(info: &BiosInfo) -> ! {
 
     let max_physical_address = allocator.max_physical_address();
 
-    map_complete_physical_memory_space_into_kernel(
+    // identity map vga_buffer
+    page_table
+        .identity_map(
+            PhysicalFrame::<Size4KiB>::containing_address(VGA_BUFFER_ADDRESS),
+            PageTableEntryFlags::PRESENT | PageTableEntryFlags::WRITABLE,
+            &mut allocator,
+        )
+        .expect("Failed to idenity map VGA buffer")
+        .ignore();
+
+    map_complete_physical_memory_space_at_an_offset_into_kernel(
         &mut allocator,
         &mut page_table,
         max_physical_address,

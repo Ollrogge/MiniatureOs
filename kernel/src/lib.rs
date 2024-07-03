@@ -18,6 +18,7 @@ pub mod interrupts;
 pub mod paging;
 pub mod qemu;
 pub mod serial;
+pub mod vga;
 
 use allocator::init_heap;
 
