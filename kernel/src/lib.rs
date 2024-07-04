@@ -15,6 +15,7 @@ use x86_64::{
 
 pub mod allocator;
 pub mod interrupts;
+pub mod multitasking;
 pub mod paging;
 pub mod qemu;
 pub mod serial;

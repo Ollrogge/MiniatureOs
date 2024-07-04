@@ -16,7 +16,7 @@ use x86_64::{
     pop_scratch_registers,
     port::Port,
     push_scratch_registers,
-    register::{CS, DS, ES, SS},
+    register::{Cr2, CS, DS, ES, SS},
     tss::{TaskStateSegment, DOUBLE_FAULT_IST_IDX},
 };
 
@@ -157,73 +157,76 @@ pub fn init() {
 
     // initialize & remap pic
     PICS.lock().init(MASTER_PIC_OFFSET, SLAVE_PIC_OFFSET);
-    //PIC.lock().remap_pic();
     unsafe { interrupts::enable() };
 }
 
 // C calling convention
 extern "C" fn divide_by_zero_handler(frame: &ExceptionStackFrame) -> ! {
-    println!("Exception: divide by zero");
+    serial_println!("Exception: divide by zero");
     loop {}
 }
 
 extern "C" fn invalid_opcode_handler(frame: &ExceptionStackFrame) -> ! {
-    println!("Invalid opcode handler");
+    serial_println!("Invalid opcode handler");
     loop {}
 }
 
 extern "C" fn general_protection_fault_handler(frame: &ExceptionStackFrame, error_code: u64) -> ! {
-    println!("General protection fault");
+    serial_println!("General protection fault");
     loop {}
 }
 
 extern "C" fn segment_not_present_handler(frame: &ExceptionStackFrame, error_code: u64) -> ! {
-    println!(
+    serial_println!(
         "General protection fault handler \n error_code: {:?} \n exception frame: {:?}",
-        error_code, frame
+        error_code,
+        frame
     );
     loop {}
 }
 
 extern "C" fn page_fault_handler(frame: &ExceptionStackFrame, error_code: u64) {
+    let address = Cr2::read();
     let error = PageFaultErrorCode::from_bits(error_code).unwrap();
-    println!(
-        "Page fault handler \n error_code: {:?} \n exception frame: {:?}",
-        error, frame
+    serial_println!(
+        "****Page fault handler**** \n    Fault address: {:#x} \n    error_code: {:?} \n    exception frame: {:?}",
+        address.as_u64(),
+        error,
+        frame
     );
     // TODO: handle
     loop {}
 }
 
 extern "C" fn alignment_check_handler(frame: &ExceptionStackFrame, error_code: u64) -> ! {
-    println!("Alignment check handler");
+    serial_println!("Alignment check handler");
     loop {}
 }
 
 extern "C" fn invalid_tss_handler(frame: &ExceptionStackFrame, error_code: u64) -> ! {
-    println!("Invalid tss handler: {:?}", frame);
+    serial_println!("Invalid tss handler: {:?}", frame);
     loop {}
 }
 
 extern "C" fn stack_segment_fault_handler(frame: &ExceptionStackFrame, error_code: u64) -> ! {
-    println!("Stack segment handler: {:?}", frame);
+    serial_println!("Stack segment handler: {:?}", frame);
     loop {}
 }
 
 extern "C" fn breakpoint_handler(frame: &ExceptionStackFrame) {
-    println!("Int3 triggered: {:?}", frame);
+    serial_println!("Int3 triggered: {:?}", frame);
 }
 
 extern "C" fn non_maskable_interrupt(frame: &ExceptionStackFrame) {
-    println!("Non maskable interrupt handler {:?}", frame);
+    serial_println!("Non maskable interrupt handler {:?}", frame);
 }
 
 extern "C" fn debug_handler(frame: &ExceptionStackFrame) {
-    println!("Debug handler {:?}", frame);
+    serial_println!("Debug handler {:?}", frame);
 }
 
 extern "C" fn device_not_available_handler(frame: &ExceptionStackFrame) {
-    println!("Device not available handler {:?}", frame);
+    serial_println!("Device not available handler {:?}", frame);
 }
 
 // double fault acts kind of like a catch-all block
@@ -233,8 +236,8 @@ extern "C" fn device_not_available_handler(frame: &ExceptionStackFrame) {
 // https://os.phil-opp.com/double-fault-exceptions/
 // (A double fault will always generate an error code with a value of zero. )
 extern "C" fn double_fault_handler(frame: &ExceptionStackFrame, _error_code: u64) -> ! {
-    println!("Double fault error code: {}", _error_code);
-    println!("Double fault handler: {:?}", frame);
+    serial_println!("Double fault error code: {}", _error_code);
+    serial_println!("Double fault handler: {:?}", frame);
     loop {}
 }
 
@@ -247,6 +250,8 @@ extern "C" fn timer_interrupt_handler(_frame: &ExceptionStackFrame) {
 extern "C" fn keyboard_interrupt_handler(_frame: &ExceptionStackFrame) {
     let mut port = Port::new(0x60);
     let scancode: u8 = unsafe { port.read() };
+
+    print!("k");
 
     PICS.lock()
         .notify_end_of_interrupt(InterruptIndex::Keyboard.as_remapped_idt_number());

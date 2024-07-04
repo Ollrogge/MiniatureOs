@@ -11,11 +11,15 @@ lazy_static! {
     /// A global `Writer` instance that can be used for printing to the VGA text buffer.
     ///
     /// Used by the `print!` and `println!` macros.
-    pub static ref WRITER: Mutex<Writer> = Mutex::new(Writer {
-        column_position: 0,
-        color_code: ColorCode::new(Color::Yellow, Color::Black),
-        buffer: unsafe { &mut *(VGA_BUFFER_ADDRESS as *mut Buffer) },
-    });
+    pub static ref WRITER: Mutex<Writer> = {
+        let writer = Writer {
+            column_position: 0,
+            color_code: ColorCode::new(Color::Yellow, Color::Black),
+            buffer: unsafe { &mut *(VGA_BUFFER_ADDRESS as *mut Buffer) },
+        };
+
+        Mutex::new(writer)
+    };
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -150,6 +154,18 @@ impl fmt::Write for Writer {
     }
 }
 
+/// Prints the given formatted string to the VGA text buffer
+/// through the global `WRITER` instance.
+#[doc(hidden)]
+pub fn _print(args: fmt::Arguments) {
+    interrupts::without_interrupts(|| {
+        WRITER
+            .lock()
+            .write_fmt(args)
+            .expect("Printing to vga failed");
+    });
+}
+
 /// Like the `print!` macro in the standard library, but prints to the VGA text buffer.
 #[macro_export]
 macro_rules! print {
@@ -161,13 +177,4 @@ macro_rules! print {
 macro_rules! println {
     () => ($crate::print!("\n"));
     ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)));
-}
-
-/// Prints the given formatted string to the VGA text buffer
-/// through the global `WRITER` instance.
-#[doc(hidden)]
-pub fn _print(args: fmt::Arguments) {
-    interrupts::without_interrupts(|| {
-        WRITER.lock().write_fmt(args).unwrap();
-    });
 }

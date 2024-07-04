@@ -32,9 +32,9 @@ use x86_64::{
 
 // hardcoded for now
 const KERNEL_VIRTUAL_BASE: u64 = 0xffffffff80000000;
+//const KERNEL_STACK_TOP: u64 = 0xffffffff00000000;
 const KERNEL_STACK_TOP: u64 = 0xffffffff00000000;
 const KERNEL_STACK_SIZE: u64 = 128 * KIB;
-const VGA_BUFFER_ADDRESS: PhysicalAddress = PhysicalAddress::new(0xb8000);
 // map the complete physical address space at this offset in order to enable
 // the kernel to easily access the page table
 // https://os.phil-opp.com/paging-implementation/#map-at-a-fixed-offset
@@ -60,6 +60,7 @@ pub extern "C" fn _start(info: &BiosInfo) -> ! {
 /// Performs the actual context switch.
 fn context_switch(page_table: u64, stack_top: u64, entry_point: u64, boot_info: u64) -> ! {
     unsafe {
+        // should be disabled but lets make sure
         asm!(
             "xor rbp, rbp",
             // Writing to cr3, will invalidate the whole tlb so no need to flush
@@ -81,7 +82,7 @@ where
     A: FrameAllocator<Size4KiB>,
     M: Mapper<Size4KiB>,
 {
-    let end_page = Page::containing_address(VirtualAddress::new(KERNEL_STACK_TOP));
+    let end_page = Page::containing_address(VirtualAddress::new(KERNEL_STACK_TOP - 1));
     // grows downwards
     let start_page = Page::containing_address(VirtualAddress::new(
         KERNEL_STACK_TOP - KERNEL_STACK_SIZE as u64,
@@ -118,7 +119,7 @@ where
         .expect("Failed to map guard page")
         .ignore();
 
-    end_page.address
+    VirtualAddress::new(KERNEL_STACK_TOP)
 }
 
 // identity-map context switch function, so that we don't get an immediate pagefault
@@ -381,29 +382,35 @@ fn start(info: &BiosInfo) -> ! {
 
     initialize_and_map_gdt(&mut allocator, &mut page_table);
 
-    // No more allocations should be done after the boot info has been allocated.
-    // Otherwise memory regions information is incorrect
-    let boot_info_address =
-        allocate_and_map_boot_info(&mut allocator, &mut page_table, &info, memory_map);
+    // identiy map complete vga region [0xA0000-0xC0000)
+    let start_frame: PhysicalFrame<Size4KiB> =
+        PhysicalFrame::containing_address(PhysicalAddress::new(0xa0000));
+    let end_frame: PhysicalFrame<Size4KiB> =
+        PhysicalFrame::containing_address(PhysicalAddress::new(0xc0000 - 1));
+
+    for frame in PhysicalFrame::range_inclusive(start_frame, end_frame) {
+        page_table
+            .identity_map(
+                frame,
+                PageTableEntryFlags::PRESENT | PageTableEntryFlags::WRITABLE,
+                &mut allocator,
+            )
+            .expect("Failed to idenity map VGA buffer")
+            .ignore();
+    }
 
     let max_physical_address = allocator.max_physical_address();
-
-    // identity map vga_buffer
-    page_table
-        .identity_map(
-            PhysicalFrame::<Size4KiB>::containing_address(VGA_BUFFER_ADDRESS),
-            PageTableEntryFlags::PRESENT | PageTableEntryFlags::WRITABLE,
-            &mut allocator,
-        )
-        .expect("Failed to idenity map VGA buffer")
-        .ignore();
-
     map_complete_physical_memory_space_at_an_offset_into_kernel(
         &mut allocator,
         &mut page_table,
         max_physical_address,
         VirtualAddress::new(PHYSICAL_MEMORY_OFFSET),
     );
+
+    // IMPORTANT: No more allocations should be done after the boot info has been allocated.
+    // Otherwise memory regions information is incorrect
+    let boot_info_address =
+        allocate_and_map_boot_info(&mut allocator, &mut page_table, &info, memory_map);
 
     // todo: detect RSDP (Root System Description Pointer)
     println!(

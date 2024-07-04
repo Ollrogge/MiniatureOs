@@ -6,9 +6,10 @@ use api::{BootInfo, PhysicalMemoryRegions};
 use core::{alloc::Layout, arch::asm, mem::size_of, panic::PanicInfo};
 use kernel::{
     allocator::{
-        buddy_allocator::BuddyAllocator, init_heap, Locked, ALLOCATOR, HEAP_SIZE, HEAP_START,
+        buddy_allocator::{BuddyAllocator, Chunk},
+        init_heap, Locked, ALLOCATOR, HEAP_SIZE, HEAP_START,
     },
-    interrupts, kernel_init, println, serial_println,
+    interrupts, kernel_init, print, println, serial_println,
 };
 use x86_64::{
     instructions::{hlt, int3},
@@ -21,7 +22,7 @@ use alloc::{boxed::Box, vec::Vec};
 
 #[panic_handler]
 pub fn panic(info: &PanicInfo) -> ! {
-    println!("Kernel PANIC: {}", info);
+    serial_println!("Kernel PANIC: {}", info);
     loop {}
 }
 
@@ -134,7 +135,7 @@ fn test_heap_allocations() {
         assert_eq!(*heap_value_1, 41);
         assert_eq!(*heap_value_2, 13);
 
-        let n = 1000;
+        let n = 4000;
         let mut vec = Vec::new();
         for i in 0..n {
             vec.push(i);
@@ -142,7 +143,8 @@ fn test_heap_allocations() {
         assert_eq!(vec.iter().sum::<u64>(), (n - 1) * n / 2);
     }
 
-    for i in 0..HEAP_SIZE {
+    // test for any race conditions between timer and this loop
+    for i in 0..100000 {
         let x = Box::new(i);
         assert_eq!(*x, i);
     }
@@ -155,11 +157,7 @@ fn hlt_loop() -> ! {
 }
 
 fn start(info: &'static BootInfo) -> ! {
-    //println!("Hello from kernel <3");
-    interrupts::init();
-    serial_println!("Hello from kernel");
-
-    loop {}
+    println!("Hello from kernel");
 
     print_memory_map(&info.memory_regions);
 
@@ -169,8 +167,6 @@ fn start(info: &'static BootInfo) -> ! {
 
     unsafe { test_buddy_allocator() };
     println!("Buddy allocator tested");
-
-    println!("Framebuffer info: {:#x}", info.framebuffer.region.start());
 
     test_heap_allocations();
     println!("Heap tested");

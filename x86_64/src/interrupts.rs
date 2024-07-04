@@ -1,3 +1,4 @@
+use crate::register::{RFlags, RFlagsReg};
 use bitflags::bitflags;
 use core::{arch::asm, fmt};
 
@@ -41,7 +42,7 @@ macro_rules! push_scratch_registers {
 #[macro_export]
 macro_rules! pop_scratch_registers {
     () => {
-        "pop rax; pop rcx; pop rdx; pop rsi; pop rdi; pop r8; pop r9; pop r10; pop r11"
+        "pop r11; pop r10; pop r9; pop r8; pop rdi; pop rsi; pop rdx; pop rcx; pop rax"
     };
 }
 
@@ -62,6 +63,9 @@ macro_rules! pop_scratch_registers {
 //  when you call an interrupt-gate, interrupts get disabled, and when you
 //  call a trap-gate, they don't
 
+// METHODS USE interrupt gate, so interrupts will be disabled on entry and enabled
+// on exit
+
 // pointer alignment needed since exception frame = 5 registers + 9 scratch registers + 1 error code = 15 => unaligned
 #[macro_export]
 macro_rules! handler_with_error_code {
@@ -71,10 +75,10 @@ macro_rules! handler_with_error_code {
             unsafe {
                 asm!(
                     push_scratch_registers!(),
-                    "mov rsi, [rsp + 9*8]", // pop error code (cant use pop before saving scratch registers since this would corrupt rsi)
+                    "mov rsi, [rsp + 9*8]", // load error code (cant use pop before saving scratch registers since this would corrupt rsi)
                     "mov rdi, rsp",
-                    "add rdi, 10*8", // jump over saved scratch registers and error code
-                    "sub rsp, 8",
+                    "add rdi, 10*8", // calculate exception stack frame pointer
+                    "sub rsp, 8", // alignment
                     "call {}",
                     "add rsp, 8",
                     pop_scratch_registers!(),
@@ -104,7 +108,7 @@ macro_rules! handler_without_error_code {
                     pop_scratch_registers!(),
                     "iretq",
                     sym $name,
-                    options(noreturn)
+                    options(noreturn),
                 )
             }
         }
@@ -149,13 +153,25 @@ impl fmt::Debug for ExceptionStackFrame {
     }
 }
 
+fn are_enabled() -> bool {
+    RFlagsReg::read().contains(RFlags::INTERRUPT_FLAG)
+}
+
 pub fn without_interrupts<F, R>(c: F) -> R
 where
     F: FnOnce() -> R,
 {
-    unsafe { disable() };
+    let were_enabled = are_enabled();
+
+    if were_enabled {
+        unsafe { disable() };
+    }
+
     let ret = c();
-    unsafe { enable() };
+
+    if were_enabled {
+        unsafe { enable() };
+    }
 
     ret
 }

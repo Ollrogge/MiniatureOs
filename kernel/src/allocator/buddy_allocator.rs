@@ -2,6 +2,7 @@
 //!
 extern crate alloc;
 use super::Locked;
+use crate::{println, serial_print, serial_println};
 use alloc::{
     alloc::{GlobalAlloc, Layout},
     borrow::ToOwned,
@@ -11,12 +12,9 @@ use core::{
     mem::MaybeUninit,
     ptr::NonNull,
 };
-use x86_64::{
-    memory::{
-        Address, FrameAllocator, MemoryRegion, PageSize, PhysicalAddress, PhysicalFrame,
-        PhysicalMemoryRegion, PhysicalMemoryRegionType, Region, Size2MiB, Size4KiB, VirtualAddress,
-    },
-    println,
+use x86_64::memory::{
+    Address, FrameAllocator, MemoryRegion, PageSize, PhysicalAddress, PhysicalFrame,
+    PhysicalMemoryRegion, PhysicalMemoryRegionType, Region, Size2MiB, Size4KiB, VirtualAddress,
 };
 // todo: make a frame_allocators directory
 //  - lib (or mod idk) file contains the trait def
@@ -201,7 +199,7 @@ impl LinkedListTrait for LinkedList {
             if node.start() == start {
                 // If the node to be removed is found, update the links
                 match last_chunk {
-                    Some(mut last_node_ptr) => unsafe { last_node_ptr.as_mut().next = node.next },
+                    Some(mut last_chunk_ptr) => unsafe { last_chunk_ptr.as_mut().next = node.next },
                     None => self.head = node.next,
                 }
 
@@ -294,7 +292,6 @@ impl<'a> BuddyAllocator {
     /// Alloc a power of two sized range of memory satisfying the layout requirement
     pub unsafe fn alloc(&mut self, layout: Layout) -> Option<NonNull<Chunk>> {
         let size = Self::align_layout_size(layout);
-
         let class = size.trailing_zeros() as usize;
         // Find first non-empty size class
         for i in class..self.buddies.len() {
@@ -314,22 +311,11 @@ impl<'a> BuddyAllocator {
                     let sz = 1 << (j - 1);
                     let addr = chunk.address();
                     let split_node1 = unsafe { Chunk::new_at_address(addr, sz) };
-
                     self.buddies[j - 1].push_front(split_node1);
 
                     let sz = 1 << (j - 1);
                     let addr = chunk.address() + sz;
-
                     let split_node2 = unsafe { Chunk::new_at_address(addr, sz) };
-
-                    /*
-                    println!(
-                        "Buddy allocator Split buddy: b1.start: {:#x}, b2.start: {:#x}",
-                        region.start(),
-                        region.start() + (1 << (j - 1))
-                    );
-                    */
-
                     self.buddies[j - 1].push_front(split_node2);
                 } else {
                     return None;
@@ -354,6 +340,7 @@ impl<'a> BuddyAllocator {
             buddy.set_start(region.start() ^ (1 << current_class));
             // TODO: removing a buddy is O(N). Could be sped up by using e.g. a B-Tree
             match self.buddies[current_class].remove(buddy.start()) {
+                // merge two buddies
                 Some(_) => {
                     // adjust region for higher size class
                     region.set_start(min(region.start(), buddy.start()));

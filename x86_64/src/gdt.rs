@@ -1,5 +1,5 @@
 //! Global Descriptor Table definitions
-use crate::{memory::VirtualAddress, tss::TaskStateSegment, PrivilegeLevel};
+use crate::{interrupts, memory::VirtualAddress, tss::TaskStateSegment, PrivilegeLevel};
 use bit_field::BitField;
 use bitflags::bitflags;
 use core::{arch::asm, convert::From, mem::size_of, ptr};
@@ -246,7 +246,8 @@ impl GlobalDescriptorTable {
         let desc = GlobalDescriptorTableDescriptor::new(self);
 
         unsafe {
-            asm!("cli", "lgdt [{}]", in(reg) &desc, options(readonly, nostack, preserves_flags));
+            interrupts::disable();
+            asm!("lgdt [{}]", in(reg) &desc, options(readonly, nostack, preserves_flags));
         }
     }
 

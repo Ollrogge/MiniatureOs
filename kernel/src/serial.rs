@@ -1,4 +1,4 @@
-use core::fmt;
+use core::fmt::{self, Write};
 use lazy_static::lazy_static;
 use util::mutex::Mutex;
 use x86_64::{
@@ -16,8 +16,6 @@ lazy_static! {
 
 #[doc(hidden)]
 pub fn _print(args: fmt::Arguments) {
-    use core::fmt::Write;
-
     interrupts::without_interrupts(|| {
         SERIAL
             .lock()
