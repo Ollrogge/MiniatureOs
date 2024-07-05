@@ -15,6 +15,8 @@ pub enum PixelFormat {
     },
 }
 
+// This struct MUST NOT contain any usize types since it is passed between different
+// CPU operating modes and therefore usize representation changes.
 #[derive(Clone, Copy, Debug, Default)]
 #[repr(C)]
 #[repr(align(8))]
@@ -72,12 +74,13 @@ impl DerefMut for PhysicalMemoryRegions {
     }
 }
 
+// This structure can contain usize since it is only passed on long mode
 pub struct BootInfo {
     pub kernel: PhysicalMemoryRegion,
     pub kernel_stack: VirtualMemoryRegion,
     pub framebuffer: FramebufferInfo,
     pub memory_regions: PhysicalMemoryRegions,
-    pub physical_memory_offset: u64,
+    pub physical_memory_offset: usize,
 }
 
 impl BootInfo {
@@ -86,7 +89,7 @@ impl BootInfo {
         kernel_stack: VirtualMemoryRegion,
         framebuffer: FramebufferInfo,
         memory_regions: PhysicalMemoryRegions,
-        physical_memory_offset: u64,
+        physical_memory_offset: usize,
     ) -> Self {
         Self {
             kernel,

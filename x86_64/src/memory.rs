@@ -2,7 +2,7 @@ use bit_field::BitField;
 use core::{
     fmt::{self, Display, Formatter, LowerHex, Result},
     marker::PhantomData,
-    ops::{Add, AddAssign, Sub},
+    ops::{Add, AddAssign, Rem, Sub},
 };
 
 pub const KIB: u64 = 1024;
@@ -26,8 +26,8 @@ pub trait MemoryRegion: Copy + core::fmt::Debug {
     fn start(&self) -> u64;
     fn set_start(&mut self, start: u64);
     fn end(&self) -> u64;
-    fn size(&self) -> u64;
-    fn set_size(&mut self, size: u64);
+    fn size(&self) -> usize;
+    fn set_size(&mut self, size: usize);
     fn contains(&self, start: u64) -> bool;
     fn is_usable(&self) -> bool;
 }
@@ -35,12 +35,12 @@ pub trait MemoryRegion: Copy + core::fmt::Debug {
 #[derive(Clone, Copy, Debug)]
 pub struct Region {
     pub start: u64,
-    pub size: u64,
+    pub size: usize,
 }
 
 impl Region {
-    pub fn new(start: u64, len: u64) -> Region {
-        Region { start, size: len }
+    pub fn new(start: u64, size: usize) -> Region {
+        Region { start, size }
     }
 }
 
@@ -50,10 +50,10 @@ impl MemoryRegion for Region {
     }
 
     fn end(&self) -> u64 {
-        self.start + self.size
+        self.start + self.size as u64
     }
 
-    fn size(&self) -> u64 {
+    fn size(&self) -> usize {
         self.size
     }
 
@@ -69,7 +69,7 @@ impl MemoryRegion for Region {
         self.start = start
     }
 
-    fn set_size(&mut self, size: u64) {
+    fn set_size(&mut self, size: usize) {
         self.size = size
     }
 }
@@ -96,8 +96,8 @@ impl MemoryRegion for VirtualMemoryRegion {
         self.start() + self.size as u64
     }
 
-    fn size(&self) -> u64 {
-        self.size as u64
+    fn size(&self) -> usize {
+        self.size
     }
 
     fn contains(&self, address: u64) -> bool {
@@ -112,8 +112,8 @@ impl MemoryRegion for VirtualMemoryRegion {
         self.start = VirtualAddress::new(start)
     }
 
-    fn set_size(&mut self, size: u64) {
-        self.size = size as usize
+    fn set_size(&mut self, size: usize) {
+        self.size = size
     }
 }
 
@@ -133,6 +133,8 @@ pub enum PhysicalMemoryRegionType {
 
 // ensure 8 byte alignment so it works between the different cpu modes where we have
 // 2 byte, 4 byte and 8 byte alignments
+// This struct MUST NOT contain any usize types since it is passed between different
+// CPU operating modes and therefore usize representation changes.
 #[derive(Clone, Copy, Debug, Default)]
 #[repr(C)]
 #[repr(align(8))]
@@ -158,11 +160,11 @@ impl MemoryRegion for PhysicalMemoryRegion {
     }
 
     fn end(&self) -> u64 {
-        self.start + self.size
+        self.start + self.size as u64
     }
 
-    fn size(&self) -> u64 {
-        self.size
+    fn size(&self) -> usize {
+        self.size as usize
     }
 
     fn contains(&self, address: u64) -> bool {
@@ -177,27 +179,27 @@ impl MemoryRegion for PhysicalMemoryRegion {
         self.start = start
     }
 
-    fn set_size(&mut self, size: u64) {
-        self.size = size
+    fn set_size(&mut self, size: usize) {
+        self.size = size as u64
     }
 }
 
 pub trait PageSize: Copy + Eq + PartialOrd + Ord {
-    const SIZE: u64;
+    const SIZE: usize;
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Debug)]
 pub enum Size4KiB {}
 
 impl PageSize for Size4KiB {
-    const SIZE: u64 = 0x1000;
+    const SIZE: usize = 0x1000;
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Debug)]
 pub enum Size2MiB {}
 
 impl PageSize for Size2MiB {
-    const SIZE: u64 = 0x200000;
+    const SIZE: usize = 0x200000;
 }
 
 pub trait Address {
@@ -303,6 +305,21 @@ impl Sub<PhysicalAddress> for PhysicalAddress {
     }
 }
 
+impl Rem<u64> for PhysicalAddress {
+    type Output = Self;
+    fn rem(self, rhs: u64) -> Self::Output {
+        Self(self.0 % rhs)
+    }
+}
+
+impl Rem<usize> for PhysicalAddress {
+    type Output = Self;
+    fn rem(self, rhs: usize) -> Self::Output {
+        let rhs: u64 = rhs.try_into().unwrap();
+        Self(self.0 % rhs)
+    }
+}
+
 impl AddAssign<u64> for PhysicalAddress {
     fn add_assign(&mut self, rhs: u64) {
         self.0 += rhs;
@@ -332,7 +349,8 @@ impl VirtualAddress {
         VirtualAddress(addr)
     }
 
-    pub fn align_up(&self, align: u64) -> Self {
+    pub fn align_up(&self, align: usize) -> Self {
+        let align = align as u64;
         let addr = (self.0 + align - 1) & !(align - 1);
         VirtualAddress(addr)
     }
@@ -396,14 +414,6 @@ impl Add<u64> for VirtualAddress {
     }
 }
 
-impl Add<VirtualAddress> for u64 {
-    type Output = VirtualAddress;
-
-    fn add(self, rhs: VirtualAddress) -> Self::Output {
-        VirtualAddress(self + rhs.0)
-    }
-}
-
 impl Add<usize> for VirtualAddress {
     type Output = Self;
     fn add(self, rhs: usize) -> Self::Output {
@@ -412,10 +422,41 @@ impl Add<usize> for VirtualAddress {
     }
 }
 
+impl Add<VirtualAddress> for u64 {
+    type Output = VirtualAddress;
+
+    fn add(self, rhs: VirtualAddress) -> Self::Output {
+        VirtualAddress(self + rhs.0)
+    }
+}
+
 impl Sub<u64> for VirtualAddress {
     type Output = Self;
     fn sub(self, rhs: u64) -> Self::Output {
         Self(self.0.checked_sub(rhs).unwrap())
+    }
+}
+
+impl Sub<usize> for VirtualAddress {
+    type Output = Self;
+    fn sub(self, rhs: usize) -> Self::Output {
+        let rhs: u64 = rhs.try_into().unwrap();
+        Self(self.0.checked_sub(rhs).unwrap())
+    }
+}
+
+impl Rem<u64> for VirtualAddress {
+    type Output = Self;
+    fn rem(self, rhs: u64) -> Self::Output {
+        Self(self.0 % rhs)
+    }
+}
+
+impl Rem<usize> for VirtualAddress {
+    type Output = Self;
+    fn rem(self, rhs: usize) -> Self::Output {
+        let rhs: u64 = rhs.try_into().unwrap();
+        Self(self.0 % rhs)
     }
 }
 
@@ -468,7 +509,7 @@ impl<S: PageSize> Display for PhysicalFrame<S> {
 impl<S: PageSize> PhysicalFrame<S> {
     pub fn containing_address(address: PhysicalAddress) -> Self {
         Self {
-            address: address.align_down(S::SIZE),
+            address: address.align_down(S::SIZE as u64),
             size: PhantomData,
         }
     }
@@ -521,7 +562,7 @@ impl<S: PageSize> Iterator for PhysicalFrameRangeInclusive<S> {
 impl<S: PageSize> Add<u64> for PhysicalFrame<S> {
     type Output = Self;
     fn add(self, rhs: u64) -> Self::Output {
-        PhysicalFrame::containing_address(self.address + rhs * S::SIZE)
+        PhysicalFrame::containing_address(self.address + rhs * S::SIZE as u64)
     }
 }
 
@@ -536,20 +577,20 @@ impl<S: PageSize> Add<PhysicalFrame<S>> for PhysicalFrame<S> {
 impl<S: PageSize> Sub<u64> for PhysicalFrame<S> {
     type Output = Self;
     fn sub(self, rhs: u64) -> Self::Output {
-        PhysicalFrame::containing_address(self.address - rhs * S::SIZE)
+        PhysicalFrame::containing_address(self.address - rhs * S::SIZE as u64)
     }
 }
 
 impl<S: PageSize> Sub<PhysicalFrame<S>> for PhysicalFrame<S> {
     type Output = u64;
     fn sub(self, rhs: PhysicalFrame<S>) -> Self::Output {
-        (self.address.as_u64() - rhs.address.as_u64()) / S::SIZE
+        (self.address.as_u64() - rhs.address.as_u64()) / S::SIZE as u64
     }
 }
 
 impl<S: PageSize> AddAssign<u64> for PhysicalFrame<S> {
     fn add_assign(&mut self, rhs: u64) {
-        self.address += S::SIZE * rhs;
+        self.address += S::SIZE as u64 * rhs;
     }
 }
 
@@ -565,7 +606,7 @@ impl<S: PageSize> Page<S> {
     /// Aligns the address down to the next page boundary
     pub fn containing_address(address: VirtualAddress) -> Self {
         Self {
-            address: address.align_down(S::SIZE),
+            address: address.align_down(S::SIZE as u64),
             size: PhantomData,
         }
     }
@@ -575,7 +616,7 @@ impl<S: PageSize> Page<S> {
     /// The addressed passed must be page aligned. Else this function
     /// panics
     pub fn for_address(address: VirtualAddress) -> Self {
-        assert!(address.is_aligned(S::SIZE));
+        assert!(address.is_aligned(S::SIZE as u64));
         Self {
             address,
             size: PhantomData,
@@ -586,7 +627,7 @@ impl<S: PageSize> Page<S> {
         PageRangeInclusive { start, end }
     }
 
-    pub fn size(self) -> u64 {
+    pub fn size(self) -> usize {
         S::SIZE
     }
 
@@ -626,6 +667,13 @@ impl<S: PageSize> Iterator for PageRangeInclusive<S> {
 impl<S: PageSize> Add<u64> for Page<S> {
     type Output = Self;
     fn add(self, rhs: u64) -> Self::Output {
+        Page::containing_address(self.address + rhs * S::SIZE as u64)
+    }
+}
+
+impl<S: PageSize> Add<usize> for Page<S> {
+    type Output = Self;
+    fn add(self, rhs: usize) -> Self::Output {
         Page::containing_address(self.address + rhs * S::SIZE)
     }
 }
@@ -633,6 +681,13 @@ impl<S: PageSize> Add<u64> for Page<S> {
 impl<S: PageSize> Sub<u64> for Page<S> {
     type Output = Self;
     fn sub(self, rhs: u64) -> Self::Output {
+        Page::containing_address(self.address - rhs * S::SIZE as u64)
+    }
+}
+
+impl<S: PageSize> Sub<usize> for Page<S> {
+    type Output = Self;
+    fn sub(self, rhs: usize) -> Self::Output {
         Page::containing_address(self.address - rhs * S::SIZE)
     }
 }
@@ -640,12 +695,12 @@ impl<S: PageSize> Sub<u64> for Page<S> {
 impl<S: PageSize> Sub<Page<S>> for Page<S> {
     type Output = u64;
     fn sub(self, rhs: Page<S>) -> Self::Output {
-        (self.address.as_u64() - rhs.address.as_u64()) / S::SIZE
+        (self.address - rhs.address) / S::SIZE as u64
     }
 }
 
 impl<S: PageSize> AddAssign<u64> for Page<S> {
     fn add_assign(&mut self, rhs: u64) {
-        self.address += S::SIZE * rhs;
+        self.address += S::SIZE as u64 * rhs;
     }
 }

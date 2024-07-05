@@ -64,7 +64,7 @@ where
     fn usable_frames(&self) -> impl Iterator<Item = PhysicalFrame> {
         let usable_regions = self.memory_map.clone().filter(|r| r.is_usable());
         let addr_ranges = usable_regions.map(|r| r.start()..r.end());
-        let frame_addresses = addr_ranges.flat_map(|r| r.step_by(Size4KiB::SIZE as usize));
+        let frame_addresses = addr_ranges.flat_map(|r| r.step_by(Size4KiB::SIZE));
         frame_addresses.map(|addr| PhysicalFrame::containing_address(PhysicalAddress::new(addr)))
     }
 }

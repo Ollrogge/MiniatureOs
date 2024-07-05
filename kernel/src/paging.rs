@@ -8,7 +8,7 @@ use x86_64::{
 pub unsafe fn init(bios_info: &'static BootInfo) -> &'static mut PageTable {
     let (plm4t, _) = Cr3::read();
 
-    let virtual_base = VirtualAddress::new(plm4t.start() + bios_info.physical_memory_offset);
+    let virtual_base = VirtualAddress::new(plm4t.start() + bios_info.physical_memory_offset as u64);
     let page_table_ptr: *mut PageTable = virtual_base.as_mut_ptr();
     &mut *page_table_ptr
 }

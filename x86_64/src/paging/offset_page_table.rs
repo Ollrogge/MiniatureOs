@@ -9,18 +9,18 @@ use crate::{
 };
 #[derive(Debug)]
 pub struct PhysicalOffset {
-    offset: u64,
+    offset: usize,
 }
 
 impl PhysicalOffset {
-    pub fn new(offset: u64) -> Self {
+    pub fn new(offset: usize) -> Self {
         Self { offset }
     }
 }
 
 unsafe impl PageTableFrameMapping for PhysicalOffset {
     fn frame_to_virtual(&self, frame: PhysicalFrame) -> VirtualAddress {
-        VirtualAddress::new(self.offset + frame.address().as_u64())
+        VirtualAddress::new(frame.address.as_u64()) + self.offset
     }
 }
 

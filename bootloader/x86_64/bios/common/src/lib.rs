@@ -20,6 +20,8 @@ pub extern "C" fn fail(code: u8) -> ! {
     panic!("Fail called with code: {:x}", code);
 }
 
+// This struct MUST NOT contain any usize types since it is passed between different
+// CPU operating modes and therefore usize representation changes.
 #[derive(Debug, Default)]
 #[repr(C)]
 pub struct BiosInfo {
@@ -120,15 +122,15 @@ impl MemoryRegion for E820MemoryRegion {
     }
 
     fn end(&self) -> u64 {
-        self.start + self.size
+        self.start + self.size as u64
     }
 
-    fn size(&self) -> u64 {
-        self.size
+    fn size(&self) -> usize {
+        self.size as usize
     }
 
-    fn set_size(&mut self, size: u64) {
-        self.size = size
+    fn set_size(&mut self, size: usize) {
+        self.size = size as u64
     }
 
     fn contains(&self, address: u64) -> bool {

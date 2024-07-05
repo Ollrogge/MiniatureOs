@@ -25,7 +25,7 @@ where
 {
     // map heap range
     let start_page = Page::containing_address(HEAP_START);
-    let end_page = Page::containing_address(HEAP_START + HEAP_SIZE - 1);
+    let end_page = Page::containing_address(HEAP_START + HEAP_SIZE - 1usize);
     for page in Page::range_inclusive(start_page, end_page) {
         let frame = frame_allocator
             .allocate_frame()

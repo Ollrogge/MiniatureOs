@@ -31,15 +31,15 @@ use x86_64::{
 };
 
 // hardcoded for now
-const KERNEL_VIRTUAL_BASE: u64 = 0xffffffff80000000;
+const KERNEL_VIRTUAL_BASE: VirtualAddress = VirtualAddress::new(0xffffffff80000000);
 //const KERNEL_STACK_TOP: u64 = 0xffffffff00000000;
 const KERNEL_STACK_TOP: VirtualAddress = VirtualAddress::new(0xffffffff00000000);
-const KERNEL_STACK_SIZE: u64 = 128 * KIB;
+const KERNEL_STACK_SIZE: usize = 128 * KIB as usize;
 // map the complete physical address space at this offset in order to enable
 // the kernel to easily access the page table
 // https://os.phil-opp.com/paging-implementation/#map-at-a-fixed-offset
 // map it at an offset of 10 TB
-const PHYSICAL_MEMORY_OFFSET: u64 = 10 * TIB;
+const PHYSICAL_MEMORY_OFFSET: usize = 10 * TIB as usize;
 
 #[panic_handler]
 pub fn panic(info: &PanicInfo) -> ! {
@@ -82,7 +82,7 @@ where
     A: FrameAllocator<Size4KiB>,
     M: Mapper<Size4KiB>,
 {
-    let end_page = Page::containing_address(KERNEL_STACK_TOP - 1);
+    let end_page = Page::containing_address(KERNEL_STACK_TOP - 1u64);
     // grows downwards
     let start_page = Page::containing_address(KERNEL_STACK_TOP - KERNEL_STACK_SIZE);
     for page in Page::range_inclusive(start_page, end_page) {
@@ -299,23 +299,23 @@ fn map_complete_physical_memory_space_at_an_offset_into_kernel<A, M>(
     frame_allocator: &mut A,
     page_table: &mut M,
     highest_physical_address: PhysicalAddress,
-    offset: VirtualAddress,
+    offset: usize,
 ) where
     A: FrameAllocator<Size4KiB>,
     M: MapperAllSizes,
 {
     println!(
         "Mapping complete physical address space to offset: {:#x}",
-        offset.as_u64()
+        offset
     );
     let start = PhysicalFrame::containing_address(PhysicalAddress::new(0));
     let end = PhysicalFrame::containing_address(highest_physical_address);
     let alignment = Size2MiB::SIZE;
     // check 2MiB alignment
-    assert!(offset.as_u64() % alignment == 0);
+    assert!(offset % alignment == 0);
 
     for frame in PhysicalFrame::<Size2MiB>::range_inclusive(start, end) {
-        let page = Page::containing_address(offset + frame.start());
+        let page = Page::containing_address(VirtualAddress::new(offset as u64 + frame.start()));
 
         let flags = PageTableEntryFlags::PRESENT
             | PageTableEntryFlags::WRITABLE
@@ -378,7 +378,12 @@ fn start(info: &BiosInfo) -> ! {
     let mapping = PhysicalOffset::new(0);
     let mut page_table = OffsetPageTable::new(kernel_page_table, mapping);
 
-    let mut loader = KernelLoader::new(KERNEL_VIRTUAL_BASE, info, &mut page_table, &mut allocator);
+    let mut loader = KernelLoader::new(
+        KERNEL_VIRTUAL_BASE.as_u64(),
+        info,
+        &mut page_table,
+        &mut allocator,
+    );
     let kernel_entry_point = loader.load_kernel(info);
 
     let stack_top = allocate_and_map_stack(&mut allocator, &mut page_table);
@@ -409,7 +414,7 @@ fn start(info: &BiosInfo) -> ! {
         &mut allocator,
         &mut page_table,
         max_physical_address,
-        VirtualAddress::new(PHYSICAL_MEMORY_OFFSET),
+        PHYSICAL_MEMORY_OFFSET,
     );
 
     // IMPORTANT: No more allocations should be done after the boot info has been allocated.

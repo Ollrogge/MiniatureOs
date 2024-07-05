@@ -239,7 +239,6 @@ where
                     .expect("Failed to map section")
                     .ignore();
             }
-
             // .bss section handling
             if header.mem_size() > header.file_size() {
                 // take header virtual address NOT page, since page is aligned down
@@ -249,7 +248,7 @@ where
                 // Special case: last non-bss frame of the segment consists partly
                 // of data and partly of bss memory, which must be zeroed. Therefore we need
                 // to be careful to only zero part of the frame
-                let data_bytes_before_zero = zero_start.as_u64() & (Size4KiB::SIZE - 1);
+                let data_bytes_before_zero = zero_start.as_u64() & (Size4KiB::SIZE - 1usize) as u64;
                 /*
                 println!(
                     "Data bytes before zero: bytes_before_zero: {} header_mem_size: {} header_file_size: {}",
@@ -272,7 +271,7 @@ where
                         core::ptr::write_bytes(
                             ptr,
                             0x0,
-                            (Size4KiB::SIZE - data_bytes_before_zero) as usize,
+                            (Size4KiB::SIZE as u64 - data_bytes_before_zero) as usize,
                         )
                     }
                 }

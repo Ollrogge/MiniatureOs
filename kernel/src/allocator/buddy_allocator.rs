@@ -54,7 +54,7 @@ trait LinkedListTrait {
 #[derive(Clone, Copy)]
 pub struct Chunk {
     next: Option<NonNull<Chunk>>,
-    size: u64,
+    size: usize,
 }
 
 unsafe impl Send for Chunk {}
@@ -65,11 +65,11 @@ impl Chunk {
         self.size = 0;
     }
 
-    pub fn new(next: Option<NonNull<Chunk>>, size: u64) -> Self {
+    pub fn new(next: Option<NonNull<Chunk>>, size: usize) -> Self {
         Self { next, size }
     }
 
-    pub unsafe fn new_at_address(address: VirtualAddress, size: u64) -> &'static mut Chunk {
+    pub unsafe fn new_at_address(address: VirtualAddress, size: usize) -> &'static mut Chunk {
         let node: &'static mut Chunk = &mut *address.as_mut_ptr();
         node.size = size;
         node.next = None;
@@ -77,7 +77,7 @@ impl Chunk {
         node
     }
 
-    pub fn size(&self) -> u64 {
+    pub fn size(&self) -> usize {
         self.size
     }
 
@@ -266,7 +266,8 @@ impl<'a> BuddyAllocator {
                 1 << (MAX_ORDER - 1),
             );
 
-            let chunk = unsafe { Chunk::new_at_address(VirtualAddress::new(current_start), size) };
+            let chunk =
+                unsafe { Chunk::new_at_address(VirtualAddress::new(current_start), size as usize) };
 
             // 0b100 => 2 trailing zeros
             self.buddies[size.trailing_zeros() as usize].push_front(chunk);
@@ -374,7 +375,7 @@ unsafe impl GlobalAlloc for Locked<BuddyAllocator> {
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         let mut allocator = self.lock();
         let size = BuddyAllocator::align_layout_size(layout);
-        let chunk = Chunk::new_at_address(VirtualAddress::from_raw_ptr(ptr), size as u64);
+        let chunk = Chunk::new_at_address(VirtualAddress::from_raw_ptr(ptr), size);
         allocator.dealloc(NonNull::new(chunk as *mut Chunk).unwrap())
     }
 }
