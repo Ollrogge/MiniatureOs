@@ -20,6 +20,7 @@ pub const TIB: u64 = GIB * 1024;
 pub unsafe trait FrameAllocator<S: PageSize> {
     /// Allocate a frame of the appropriate size and return it if possible.
     fn allocate_frame(&mut self) -> Option<PhysicalFrame<S>>;
+    fn deallocate_frame(&mut self, frame: PhysicalFrame<S>);
 }
 
 pub trait MemoryRegion: Copy + core::fmt::Debug {
@@ -186,6 +187,9 @@ impl MemoryRegion for PhysicalMemoryRegion {
 
 pub trait PageSize: Copy + Eq + PartialOrd + Ord {
     const SIZE: usize;
+    fn is_aligned(val: usize) -> bool {
+        val & (Self::SIZE - 1) == 0
+    }
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Debug)]

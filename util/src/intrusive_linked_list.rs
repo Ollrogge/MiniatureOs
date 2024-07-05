@@ -6,6 +6,7 @@
 //!
 use core::{mem::offset_of, ptr::NonNull};
 
+/// Macro to obtain the container structure from a pointer to one of its members.
 macro_rules! container_of {
     ($ptr:expr, $type:path, $member:ident) => {
         $ptr.cast::<u8>()
@@ -14,12 +15,14 @@ macro_rules! container_of {
     };
 }
 
-struct ListNode {
+/// Node of the intrusive linked list.
+pub struct ListNode {
     next: Option<NonNull<ListNode>>,
     prev: Option<NonNull<ListNode>>,
 }
 
 impl ListNode {
+    /// Creates a new ListNode.
     pub fn new() -> Self {
         Self {
             next: None,
@@ -27,30 +30,68 @@ impl ListNode {
         }
     }
 
-    pub fn get_next(&self) -> Option<NonNull<ListNode>> {
-        self.next
+    /// Returns the next node, if any.
+    pub fn next(&self) -> Option<&ListNode> {
+        self.next.as_ref().map(|ptr| unsafe { ptr.as_ref() })
     }
 
+    /// Returns the next node as mutable, if any.
+    pub fn next_mut(&mut self) -> Option<&mut ListNode> {
+        self.next.as_mut().map(|mut ptr| unsafe { ptr.as_mut() })
+    }
+
+    /// Sets the next node.
     pub fn set_next(&mut self, next: Option<NonNull<ListNode>>) {
         self.next = next;
     }
 
-    pub fn get_prev(&self) -> Option<NonNull<ListNode>> {
-        self.prev
+    /// Returns the previous node, if any.
+    pub fn prev(&self) -> Option<&ListNode> {
+        self.prev.as_ref().map(|ptr| unsafe { ptr.as_ref() })
     }
 
+    /// Returns the previous node as mutable, if any.
+    pub fn prev_mut(&mut self) -> Option<&mut ListNode> {
+        self.prev.as_mut().map(|mut ptr| unsafe { ptr.as_mut() })
+    }
+
+    /// Sets the previous node.
     pub fn set_prev(&mut self, prev: Option<NonNull<ListNode>>) {
         self.prev = prev;
     }
+
+    /// Returns the address of the ListNode.
+    pub fn address(&self) -> usize {
+        self as *const ListNode as usize
+    }
+
+    pub fn as_ptr(&mut self) -> *mut ListNode {
+        self as *mut ListNode
+    }
+
+    /// Creates a new ListNode at the given address.
+    ///
+    /// # Safety
+    ///
+    /// This function is unsafe because it allows creating a reference to an
+    /// arbitrary memory location.
+    pub unsafe fn new_at_address(address: usize) -> &'static mut ListNode {
+        let node = &mut *(address as *mut ListNode);
+        node.next = None;
+        node.prev = None;
+        node
+    }
 }
 
-struct IntrusiveLinkedList {
+/// Intrusive doubly linked list.
+pub struct IntrusiveLinkedList {
     head: Option<NonNull<ListNode>>,
     tail: Option<NonNull<ListNode>>,
     len: usize,
 }
 
 impl IntrusiveLinkedList {
+    /// Creates a new, empty IntrusiveLinkedList.
     pub fn new() -> Self {
         Self {
             head: None,
@@ -59,15 +100,15 @@ impl IntrusiveLinkedList {
         }
     }
 
+    /// Adds a node to the front of the list.
     pub fn push_front(&mut self, new: &mut ListNode) {
-        let mut new = unsafe { NonNull::new_unchecked(new as *mut ListNode) };
+        let mut new = NonNull::new(new as *mut ListNode).unwrap();
         match self.head {
             Some(mut head) => {
                 unsafe {
                     new.as_mut().set_next(Some(head));
                     head.as_mut().set_prev(Some(new));
                 }
-
                 self.head = Some(new);
             }
             None => {
@@ -75,12 +116,12 @@ impl IntrusiveLinkedList {
                 self.tail = Some(new);
             }
         }
-
         self.len += 1;
     }
 
+    /// Adds a node to the back of the list.
     pub fn push_back(&mut self, new: &mut ListNode) {
-        let mut new = unsafe { NonNull::new_unchecked(new as *mut ListNode) };
+        let mut new = NonNull::new(new as *mut ListNode).unwrap();
         match self.tail {
             Some(mut tail) => {
                 unsafe {
@@ -94,78 +135,70 @@ impl IntrusiveLinkedList {
                 self.tail = Some(new);
             }
         }
-
         self.len += 1;
     }
 
-    pub fn pop_front(&mut self) -> Option<NonNull<ListNode>> {
-        match self.head {
-            Some(head) => {
-                let tail = self.tail.unwrap();
-                if head == tail {
-                    self.head = None;
-                    self.tail = None;
-                } else {
-                    self.head = unsafe { head.as_ref().get_next() };
-                    self.head
-                        .map(|mut head| unsafe { head.as_mut().set_next(None) });
+    /// Removes and returns the node from the front of the list.
+    pub fn pop_front(&mut self) -> Option<&mut ListNode> {
+        self.head.map(|mut head| {
+            if self.head == self.tail {
+                self.head = None;
+                self.tail = None;
+            } else {
+                self.head = unsafe { head.as_ref().next().map(|n| NonNull::from(n)) };
+                if let Some(mut new_head) = self.head {
+                    unsafe { new_head.as_mut().set_prev(None) };
                 }
-
-                self.len -= 1;
-
-                Some(head)
             }
-            None => None,
-        }
+            self.len -= 1;
+            unsafe { head.as_mut() }
+        })
     }
 
-    pub fn pop_back(&mut self) -> Option<NonNull<ListNode>> {
-        match self.tail {
-            Some(tail) => {
-                let head = self.head.unwrap();
-                if head == tail {
-                    self.head = None;
-                    self.tail = None;
-                } else {
-                    self.tail = unsafe { tail.as_ref().get_prev() };
-                    self.tail
-                        .map(|mut tail| unsafe { tail.as_mut().set_next(None) });
+    /// Removes and returns the node from the back of the list.
+    pub fn pop_back(&mut self) -> Option<&mut ListNode> {
+        self.tail.map(|mut tail| {
+            if self.head == self.tail {
+                self.head = None;
+                self.tail = None;
+            } else {
+                self.tail = unsafe { tail.as_ref().prev().map(|p| NonNull::from(p)) };
+                if let Some(mut new_tail) = self.tail {
+                    unsafe { new_tail.as_mut().set_next(None) };
                 }
-
-                self.len -= 1;
-
-                Some(tail)
             }
-            None => None,
-        }
+            self.len -= 1;
+            unsafe { tail.as_mut() }
+        })
     }
 
+    /// Returns `true` if the list is empty.
     pub fn is_empty(&self) -> bool {
         self.head.is_none()
     }
 
+    /// Returns the length of the list.
     pub fn len(&self) -> usize {
         self.len
-    }
-}
-
-struct TestStruct {
-    next: ListNode,
-    val: u64,
-}
-
-impl TestStruct {
-    pub fn new(val: u64) -> Self {
-        Self {
-            next: ListNode::new(),
-            val,
-        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    struct TestStruct {
+        next: ListNode,
+        val: u64,
+    }
+
+    impl TestStruct {
+        pub fn new(val: u64) -> Self {
+            Self {
+                next: ListNode::new(),
+                val,
+            }
+        }
+    }
 
     #[test]
     fn test_list() {

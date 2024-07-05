@@ -15,6 +15,7 @@ use core::{
 };
 
 pub mod bump_frame_allocator;
+pub mod linked_list_frame_allocator;
 pub mod mapped_page_table;
 pub mod offset_page_table;
 

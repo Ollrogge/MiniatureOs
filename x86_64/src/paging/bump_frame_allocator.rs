@@ -3,7 +3,7 @@ use crate::{
         Address, FrameAllocator, MemoryRegion, PageSize, PhysicalAddress, PhysicalFrame,
         PhysicalMemoryRegion, Size4KiB,
     },
-    println,
+    serial_println,
 };
 use core::{
     clone::Clone,
@@ -79,4 +79,7 @@ where
         self.next += 1;
         frame
     }
+
+    // not implemented by bump allocator
+    fn deallocate_frame(&mut self, _: PhysicalFrame<Size4KiB>) {}
 }

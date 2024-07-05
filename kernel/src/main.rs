@@ -183,3 +183,9 @@ fn start(info: &'static BootInfo) -> ! {
     //trigger_page_fault();
     //stack_overflow();
 }
+
+pub extern "C" fn idle_thread() -> ! {
+    println!("Idle thread running");
+
+    loop {}
+}

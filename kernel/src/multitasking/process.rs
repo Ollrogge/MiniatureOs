@@ -11,6 +11,11 @@ use x86_64::{
     register::Cr3,
 };
 
+/**
+ * Each process requires a MemoryManager bound to the current address space
+ * MemoryManager needs access to frameallocator and pagetable
+*/
+
 pub struct ProcessId(u64);
 
 impl ProcessId {
@@ -54,7 +59,7 @@ impl ProcessControlBlock {
     }
 }
 
-pub fn start_thread_in_current_process() {
+pub fn start_thread_in_current_process(name: String, func: extern "C" fn()) {
     let cur_process = scheduler::val().lock().current_process();
 
     //let thread = ThreadControlBlock::new(cur_process.clone());

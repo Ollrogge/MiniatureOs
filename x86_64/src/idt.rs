@@ -10,7 +10,7 @@
 //! Interrupt vs trap gate: when you call an interrupt-gate, interrupts get disabled,
 //! and when you call a trap-gate, they don't
 //!
-use crate::{const_assert, gdt::SegmentSelector, println, register::CS, PrivilegeLevel};
+use crate::{const_assert, gdt::SegmentSelector, register::CS, serial_println, PrivilegeLevel};
 use bit_field::BitField;
 use core::{arch::asm, default::Default, mem::size_of};
 
@@ -157,7 +157,7 @@ impl InterruptDescriptorTable {
         };
 
         let val = desc.base;
-        println!("Idt addr: {:x}", val);
+        serial_println!("Idt addr: {:x}", val);
 
         unsafe {
             lidt(&desc);
