@@ -1,4 +1,3 @@
-use buddy_allocator::BuddyAllocator;
 use core::ops::Add;
 use util::mutex::{Mutex, MutexGuard};
 /*
@@ -10,6 +9,8 @@ use x86_64::{
 };
 
 pub mod buddy_allocator;
+pub mod stack_allocator;
+use buddy_allocator::BuddyAllocator;
 
 pub const HEAP_START: VirtualAddress = VirtualAddress::new(0x_4444_4444_0000);
 pub const HEAP_SIZE: usize = 100 * 1024; // 100 KiB

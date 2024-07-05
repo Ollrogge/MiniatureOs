@@ -19,8 +19,8 @@ use x86_64::{
     gdt::{self, SegmentDescriptor},
     memory::{
         Address, FrameAllocator, MemoryRegion, Page, PageSize, PhysicalAddress, PhysicalFrame,
-        PhysicalMemoryRegion, PhysicalMemoryRegionType, Size2MiB, Size4KiB, VirtualAddress, KIB,
-        TIB,
+        PhysicalMemoryRegion, PhysicalMemoryRegionType, Size2MiB, Size4KiB, VirtualAddress,
+        VirtualMemoryRegion, KIB, TIB,
     },
     paging::{
         bump_frame_allocator::BumpFrameAllocator,
@@ -33,7 +33,7 @@ use x86_64::{
 // hardcoded for now
 const KERNEL_VIRTUAL_BASE: u64 = 0xffffffff80000000;
 //const KERNEL_STACK_TOP: u64 = 0xffffffff00000000;
-const KERNEL_STACK_TOP: u64 = 0xffffffff00000000;
+const KERNEL_STACK_TOP: VirtualAddress = VirtualAddress::new(0xffffffff00000000);
 const KERNEL_STACK_SIZE: u64 = 128 * KIB;
 // map the complete physical address space at this offset in order to enable
 // the kernel to easily access the page table
@@ -82,11 +82,9 @@ where
     A: FrameAllocator<Size4KiB>,
     M: Mapper<Size4KiB>,
 {
-    let end_page = Page::containing_address(VirtualAddress::new(KERNEL_STACK_TOP - 1));
+    let end_page = Page::containing_address(KERNEL_STACK_TOP - 1);
     // grows downwards
-    let start_page = Page::containing_address(VirtualAddress::new(
-        KERNEL_STACK_TOP - KERNEL_STACK_SIZE as u64,
-    ));
+    let start_page = Page::containing_address(KERNEL_STACK_TOP - KERNEL_STACK_SIZE);
     for page in Page::range_inclusive(start_page, end_page) {
         let frame = frame_allocator
             .allocate_frame()
@@ -119,7 +117,7 @@ where
         .expect("Failed to map guard page")
         .ignore();
 
-    VirtualAddress::new(KERNEL_STACK_TOP)
+    KERNEL_STACK_TOP
 }
 
 // identity-map context switch function, so that we don't get an immediate pagefault
@@ -270,8 +268,15 @@ where
     // write bootinfo to allocated frame
     let memory_regions =
         PhysicalMemoryRegions::new(memory_regions_ptr, usable_memory_regions_amount);
+
+    let kernel_stack = VirtualMemoryRegion::new(
+        KERNEL_STACK_TOP - KERNEL_STACK_SIZE,
+        KERNEL_STACK_SIZE as usize,
+    );
+
     let boot_info = BootInfo::new(
         info.kernel,
+        kernel_stack,
         info.framebuffer,
         memory_regions,
         PHYSICAL_MEMORY_OFFSET,

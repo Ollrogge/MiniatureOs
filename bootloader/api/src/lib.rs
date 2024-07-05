@@ -1,6 +1,6 @@
 #![no_std]
 use core::ops::{Deref, DerefMut};
-use x86_64::memory::{MemoryRegion, PhysicalMemoryRegion};
+use x86_64::memory::{MemoryRegion, PhysicalMemoryRegion, VirtualMemoryRegion};
 
 #[derive(Clone, Copy, Debug, Default)]
 #[repr(C)]
@@ -74,6 +74,7 @@ impl DerefMut for PhysicalMemoryRegions {
 
 pub struct BootInfo {
     pub kernel: PhysicalMemoryRegion,
+    pub kernel_stack: VirtualMemoryRegion,
     pub framebuffer: FramebufferInfo,
     pub memory_regions: PhysicalMemoryRegions,
     pub physical_memory_offset: u64,
@@ -82,12 +83,14 @@ pub struct BootInfo {
 impl BootInfo {
     pub fn new(
         kernel: PhysicalMemoryRegion,
+        kernel_stack: VirtualMemoryRegion,
         framebuffer: FramebufferInfo,
         memory_regions: PhysicalMemoryRegions,
         physical_memory_offset: u64,
     ) -> Self {
         Self {
             kernel,
+            kernel_stack,
             framebuffer,
             memory_regions,
             physical_memory_offset,

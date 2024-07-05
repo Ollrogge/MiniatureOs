@@ -74,6 +74,49 @@ impl MemoryRegion for Region {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct VirtualMemoryRegion {
+    pub start: VirtualAddress,
+    pub size: usize,
+}
+
+impl VirtualMemoryRegion {
+    pub fn new(start: VirtualAddress, size: usize) -> Self {
+        Self { start, size }
+    }
+}
+
+impl MemoryRegion for VirtualMemoryRegion {
+    fn start(&self) -> u64 {
+        self.start.as_u64()
+    }
+
+    fn end(&self) -> u64 {
+        self.start() + self.size as u64
+    }
+
+    fn size(&self) -> u64 {
+        self.size as u64
+    }
+
+    fn contains(&self, address: u64) -> bool {
+        self.start() <= address && address <= self.end()
+    }
+
+    fn is_usable(&self) -> bool {
+        true
+    }
+
+    fn set_start(&mut self, start: u64) {
+        self.start = VirtualAddress::new(start)
+    }
+
+    fn set_size(&mut self, size: u64) {
+        self.size = size as usize
+    }
+}
+
 #[allow(dead_code)]
 #[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
@@ -179,8 +222,24 @@ impl PhysicalAddress {
         PhysicalAddress(addr)
     }
 
+    /// Returns the inner value of the tuple struct as raw mutable pointer
+    pub fn inner_as_mut_ptr(&mut self) -> *mut u64 {
+        &mut self.0 as *mut u64
+    }
+
+    /// Returns the inner value of the tuple struct as const raw pointer
+    pub fn inner_as_ptr(&self) -> *const u64 {
+        &self.0 as *const u64
+    }
+
+    /// Inteprets the inner value as address and returns a raw mutable pointer to it
     pub fn as_mut_ptr<T>(&self) -> *mut T {
         self.as_u64() as *mut T
+    }
+
+    /// Inteprets the inner value as address and returns a const raw poiner to it
+    pub fn as_ptr<T>(&self) -> *const T {
+        self.as_u64() as *const T
     }
 
     pub fn inner(&self) -> u64 {
@@ -293,10 +352,22 @@ impl VirtualAddress {
         VirtualAddress(addr)
     }
 
+    /// Returns the inner value of the tuple struct as raw mutable pointer
+    pub fn inner_as_mut_ptr(&mut self) -> *mut u64 {
+        &mut self.0 as *mut u64
+    }
+
+    /// Returns the inner value of the tuple struct as const raw pointer
+    pub fn inner_as_ptr(&self) -> *const u64 {
+        &self.0 as *const u64
+    }
+
+    /// Inteprets the inner value as address and returns a raw mutable pointer to it
     pub fn as_mut_ptr<T>(&self) -> *mut T {
         self.as_u64() as *mut T
     }
 
+    /// Inteprets the inner value as address and returns a const raw poiner to it
     pub fn as_ptr<T>(&self) -> *const T {
         self.as_u64() as *const T
     }

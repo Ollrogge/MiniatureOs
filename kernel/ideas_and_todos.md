@@ -47,6 +47,8 @@
 + need a clear convention what happens when you add 1 to a virtual and physical address
     + +1 to frame / page should increase by 1 page or frame
     + +1 to physical address / virtual address should increase the address by one
++ change size to be usize
++ fix Region trait
 
 **Println**
 + use a different println in kernel and tests than the one exported by x86_64 crate. Defining it there is just a dirty hack to get println debugging working for this code
@@ -57,6 +59,16 @@
 
 + implement the MapperFlush functionality also in bootloader, to be forced to flush tlb later
 
+**Guard page**
++ check if implementation correct
++ don't need to map a guard page without any option (unmapped basically same)
++ just need to make sure it isnt allocated anymore
+
+**Error handling**
++ impove error handling
+    + e.g. paging
++ don't just always use except. Pass errors in a smarter way, print errors where they originate
+
 **Threads / Processes**
 + implement a way to start kernel threads
 + implement processes only for user space / kernel modules
@@ -66,3 +78,6 @@
 + Switch Stack: Change the stack pointer (ESP) to the new thread's stack.
 + Restore Context: Pop registers from the new thread's stack or restore them from the thread's context structure.
 + Return: Use iret to restore the instruction pointer (EIP) and continue execution.
+
+**Filesystem**
++  basic ext2 implementation using a node graph.

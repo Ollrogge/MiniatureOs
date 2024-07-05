@@ -7,9 +7,13 @@ use core::{alloc::Layout, arch::asm, mem::size_of, panic::PanicInfo};
 use kernel::{
     allocator::{
         buddy_allocator::{BuddyAllocator, Chunk},
-        init_heap, Locked, ALLOCATOR, HEAP_SIZE, HEAP_START,
+        init_heap,
+        stack_allocator::Stack,
+        Locked, ALLOCATOR, HEAP_SIZE, HEAP_START,
     },
-    interrupts, kernel_init, print, println, serial_println,
+    interrupts, kernel_init,
+    multitasking::process,
+    print, println, serial_println,
 };
 use x86_64::{
     instructions::{hlt, int3},
@@ -172,6 +176,8 @@ fn start(info: &'static BootInfo) -> ! {
     println!("Heap tested");
 
     trigger_int3();
+
+    process::init(info.kernel_stack.into());
 
     hlt_loop();
     //trigger_page_fault();
