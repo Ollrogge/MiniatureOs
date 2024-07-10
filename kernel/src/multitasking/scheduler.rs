@@ -1,6 +1,6 @@
 use super::{
-    process::ProcessControlBlock,
-    thread::{ThreadControlBlock, ThreadState},
+    process::Process,
+    thread::{Thread, ThreadState},
 };
 use crate::allocator::stack_allocator::Stack;
 use alloc::{collections::VecDeque, string::String, sync::Arc, vec::Vec};
@@ -11,39 +11,36 @@ use x86_64::memory::{Address, PhysicalAddress, VirtualAddress};
 
 lazy_static! {
     static ref SCHEDULER: Mutex<Scheduler> = {
-        let dummy_process = Arc::new(Mutex::new(ProcessControlBlock::new(
+        let dummy_process = Arc::new(Mutex::new(Process::new(
             String::new(),
             PhysicalAddress::new(0),
         )));
-        let dummy_thread = ThreadControlBlock::new(dummy_process, Stack::default());
+        let dummy_thread = Thread::new(dummy_process);
 
         Mutex::new(Scheduler {
             ready_threads: VecDeque::new(),
-            processes: VecDeque::new(),
             running_thread: dummy_thread,
         })
     };
 }
 
-pub fn init(process: Arc<Mutex<ProcessControlBlock>>, mut thread: ThreadControlBlock) {
+pub fn init(process: Arc<Mutex<Process>>, mut thread: Thread) {
     let mut scheduler = SCHEDULER.lock();
     thread.set_state(ThreadState::Running);
     scheduler.running_thread = thread;
-    scheduler.processes.push_back(process);
 }
 
 pub struct Scheduler {
-    processes: VecDeque<Arc<Mutex<ProcessControlBlock>>>,
-    ready_threads: VecDeque<ThreadControlBlock>,
-    running_thread: ThreadControlBlock,
+    ready_threads: VecDeque<Thread>,
+    running_thread: Thread,
 }
 
-pub fn val() -> &'static Mutex<Scheduler> {
+pub fn the() -> &'static Mutex<Scheduler> {
     &SCHEDULER
 }
 
 impl Scheduler {
-    pub fn add_thread(&mut self, thread: ThreadControlBlock) {
+    pub fn add_thread(&mut self, thread: Thread) {
         self.ready_threads.push_back(thread);
     }
 
@@ -63,7 +60,7 @@ impl Scheduler {
         }
     }
 
-    pub fn current_process(&self) -> &Arc<Mutex<ProcessControlBlock>> {
+    pub fn current_process(&self) -> &Arc<Mutex<Process>> {
         &self.running_thread.process
     }
 }

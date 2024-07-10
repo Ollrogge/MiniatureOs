@@ -18,9 +18,9 @@ use core::alloc::Layout;
 use x86_64::{
     gdt::{self, SegmentDescriptor},
     memory::{
-        Address, FrameAllocator, MemoryRegion, Page, PageSize, PhysicalAddress, PhysicalFrame,
-        PhysicalMemoryRegion, PhysicalMemoryRegionType, Size2MiB, Size4KiB, VirtualAddress,
-        VirtualMemoryRegion, KIB, TIB,
+        Address, FrameAllocator, MemoryRegion, Page, PageRangeInclusive, PageSize, PhysicalAddress,
+        PhysicalFrame, PhysicalMemoryRegion, PhysicalMemoryRegionType, Size2MiB, Size4KiB,
+        VirtualAddress, VirtualRange, KIB, TIB,
     },
     paging::{
         bump_frame_allocator::BumpFrameAllocator,
@@ -232,6 +232,7 @@ fn allocate_and_map_boot_info<A, M>(
     page_table: &mut M,
     info: &BiosInfo,
     e820_memory_map: &[E820MemoryRegion],
+    kernel_virtual_range: PageRangeInclusive,
 ) -> VirtualAddress
 where
     A: FrameAllocator<Size4KiB>,
@@ -269,13 +270,13 @@ where
     let memory_regions =
         PhysicalMemoryRegions::new(memory_regions_ptr, usable_memory_regions_amount);
 
-    let kernel_stack = VirtualMemoryRegion::new(
-        KERNEL_STACK_TOP - KERNEL_STACK_SIZE,
-        KERNEL_STACK_SIZE as usize,
+    let kernel_stack = PageRangeInclusive::new(
+        Page::containing_address(KERNEL_STACK_TOP - KERNEL_STACK_SIZE),
+        Page::containing_address(KERNEL_STACK_TOP),
     );
 
     let boot_info = BootInfo::new(
-        info.kernel,
+        kernel_virtual_range,
         kernel_stack,
         info.framebuffer,
         memory_regions,
@@ -384,7 +385,7 @@ fn start(info: &BiosInfo) -> ! {
         &mut page_table,
         &mut allocator,
     );
-    let kernel_entry_point = loader.load_kernel(info);
+    let (kernel_entry_point, kernel_virtual_range) = loader.load_kernel(info);
 
     let stack_top = allocate_and_map_stack(&mut allocator, &mut page_table);
 
@@ -419,8 +420,13 @@ fn start(info: &BiosInfo) -> ! {
 
     // IMPORTANT: No more allocations should be done after the boot info has been allocated.
     // Otherwise memory regions information is incorrect
-    let boot_info_address =
-        allocate_and_map_boot_info(&mut allocator, &mut page_table, &info, memory_map);
+    let boot_info_address = allocate_and_map_boot_info(
+        &mut allocator,
+        &mut page_table,
+        &info,
+        memory_map,
+        kernel_virtual_range,
+    );
 
     // todo: detect RSDP (Root System Description Pointer)
     println!(

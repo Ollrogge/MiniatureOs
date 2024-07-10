@@ -1,8 +1,10 @@
-use super::process::ProcessControlBlock;
+use super::process::Process;
 use crate::allocator::stack_allocator::Stack;
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec, vec::Vec};
 use util::mutex::Mutex;
-use x86_64::memory::{Address, PhysicalAddress, VirtualAddress};
+use x86_64::memory::{Address, PhysicalAddress, VirtualAddress, VirtualRange, KIB};
+
+pub type ThreadEntryPoint = extern "C" fn();
 
 #[derive(Clone, Copy)]
 pub enum ThreadState {
@@ -13,14 +15,18 @@ pub enum ThreadState {
 }
 
 #[derive(Clone)]
-pub struct ThreadControlBlock {
-    pub process: Arc<Mutex<ProcessControlBlock>>,
+pub struct Thread {
+    pub process: Arc<Mutex<Process>>,
     state: ThreadState,
-    stack: Stack,
+    stack: VirtualRange,
 }
 
-impl ThreadControlBlock {
-    pub fn new(process: Arc<Mutex<ProcessControlBlock>>, stack: Stack) -> Self {
+impl Thread {
+    pub fn new(
+        process: Arc<Mutex<Process>>,
+        stack: VirtualRange,
+        entry_point: ThreadEntryPoint,
+    ) -> Self {
         Self {
             process,
             state: ThreadState::Ready,

@@ -5,6 +5,7 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+
 [profile.release]
 panic = "abort"
 
@@ -14,7 +15,7 @@ panic = "abort"
 [dependencies]
 
 [build-dependencies]
-kernel = {path = "kernel", artifact = "bin", target = "x86_64-unknown-none" }
+kernel = {path = "kernel", artifact = "bin", target = "x86_64-unknown-none"}
 test_kernel_unittests = {path = "tests/test_kernel_unittests", artifact = "bin", target= "x86_64-unknown-none"}
 bootloader={path="./bootloader"}
 walkdir="*"

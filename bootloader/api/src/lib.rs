@@ -1,6 +1,6 @@
 #![no_std]
 use core::ops::{Deref, DerefMut};
-use x86_64::memory::{MemoryRegion, PhysicalMemoryRegion, VirtualMemoryRegion};
+use x86_64::memory::{MemoryRegion, Page, PageRangeInclusive, PhysicalMemoryRegion, VirtualRange};
 
 #[derive(Clone, Copy, Debug, Default)]
 #[repr(C)]
@@ -76,8 +76,8 @@ impl DerefMut for PhysicalMemoryRegions {
 
 // This structure can contain usize since it is only passed on long mode
 pub struct BootInfo {
-    pub kernel: PhysicalMemoryRegion,
-    pub kernel_stack: VirtualMemoryRegion,
+    pub kernel: PageRangeInclusive,
+    pub kernel_stack: PageRangeInclusive,
     pub framebuffer: FramebufferInfo,
     pub memory_regions: PhysicalMemoryRegions,
     pub physical_memory_offset: usize,
@@ -85,8 +85,8 @@ pub struct BootInfo {
 
 impl BootInfo {
     pub fn new(
-        kernel: PhysicalMemoryRegion,
-        kernel_stack: VirtualMemoryRegion,
+        kernel: PageRangeInclusive,
+        kernel_stack: PageRangeInclusive,
         framebuffer: FramebufferInfo,
         memory_regions: PhysicalMemoryRegions,
         physical_memory_offset: usize,

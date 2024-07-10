@@ -1,6 +1,8 @@
 #![no_std]
 pub mod intrusive_linked_list;
 pub mod mutex;
+#[cfg(feature = "kernel")]
+pub mod range_allocator;
 pub mod volatile;
 
 #[macro_export]

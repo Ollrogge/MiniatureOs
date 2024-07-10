@@ -165,8 +165,7 @@ fn start(info: &'static BootInfo) -> ! {
 
     print_memory_map(&info.memory_regions);
 
-    let (frame_allocator, page_table) =
-        kernel_init(info).expect("Error while trying to initialize kernel");
+    let _ = kernel_init(info).expect("Error while trying to initialize kernel");
     println!("Kernel initialized");
 
     unsafe { test_buddy_allocator() };

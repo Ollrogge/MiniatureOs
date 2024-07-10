@@ -1,21 +1,104 @@
-use super::{scheduler, thread::ThreadControlBlock};
-use crate::allocator::stack_allocator::Stack;
-use alloc::{string::String, sync::Arc};
+use super::{scheduler, thread::Thread};
+use crate::{
+    allocator::stack_allocator::{Stack, StackAllocator},
+    memory::address_space::{self, AddressSpace},
+};
+use alloc::{collections::BTreeMap, string::String, sync::Arc};
 use core::{
     arch::asm,
     sync::atomic::{AtomicU64, Ordering::Relaxed},
 };
-use util::mutex::Mutex;
+use util::mutex::{Mutex, MutexGuard};
 use x86_64::{
-    memory::{PhysicalAddress, VirtualAddress},
-    register::Cr3,
+    memory::{
+        Page, PageRangeInclusive, PhysicalAddress, PhysicalFrame, Size4KiB, VirtualAddress, KIB,
+    },
+    register::{Cr3, Cr3Flags},
 };
-
 /**
- * Each process requires a MemoryManager bound to the current address space
- * MemoryManager needs access to frameallocator and pagetable
-*/
+ *
+ * The complete memory management is handled by the MemoryManager. It allocates
+ * frames, handles page faults etc
+ *
+ * The kernel is one process. Therefore, an execution unit in the kernel space will always
+ * be a kernel thread not a process.
+ *
+ * Each process has an associated address space. The address space manages the
+ * page table and virtual memory allocations. The allocated virtual memory is
+ * stored inside VirtualMemoryRegions.
+ *
+ * Each VirtualMemoryRegion is backed by a VirtualMemoryObject. This object
+ * is either RAM backed or file backed.
+ *
+ * The VirtualMemoryObject is responsible for allocating physical memory for itself
+ *
+ *
+ * AnonymousVMObject::try_create_with_size = lazy, allocate frame when pagefault
+ * AnonymousVMObject::try_create_with_physical_pages => create pages
+ *
+ *
+ *
+ * The address space contains virtual
+ * memory regions.
+ *
+ *
+ *
+ * userspace directory has copy of complete kernel space directory
+ * kernel mapped into every process
+ *
+ *
+ * Each process has a virtual memory manager
+ * Each thread has a kernel and user stack.
+ *  + User stack initialization should be done by whatever loads the executable
+ *
+ *
+ *
+ * Initial "colonel" process which runs the idle loop
+ *  - only ever runs when there is nothing to do
+ *  - has pid 0
+ *
+ * - finializer kernel process: tears down dead processes in zombie state
+ *
+ * all process list which is basically a linked_list of processes
+ *
+ * enable interrupts once multitasking is ready
+ *
+ *  Every Process has an AddressSpace.
+    - An AddressSpace has a number of Region objects, each with a virtual base address, size, permission bits, etc.
+    - Every Region has an underlying VMObject.
 
+- VMObject is virtual and can be AnonymousVMObject (MAP_ANONYMOUS) or InodeVMObject (MAP_FILE).
+
+- Cross-process memory sharing occurs when two or more Regions in separate AddressSpaces use the same underlying VMObject.
+
+- MemoryManager handles physical page allocation, fault handling, page tables, etc.
+ *
+ */
+
+static PROCESS_TREE: Mutex<ProcessTree> = Mutex::new(ProcessTree::new());
+const DEFAULT_STACK_SIZE: usize = 32 * KIB as usize;
+
+struct ProcessTree {
+    inner: BTreeMap<ProcessId, Arc<Mutex<Process>>>,
+}
+
+impl ProcessTree {
+    pub const fn new() -> Self {
+        Self {
+            inner: BTreeMap::new(),
+        }
+    }
+
+    pub fn add_process(&mut self, id: ProcessId, process: Arc<Mutex<Process>>) {
+        self.inner.insert(id, process);
+    }
+
+    pub fn lock() -> MutexGuard<'static, Self> {
+        PROCESS_TREE.lock()
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord)]
 pub struct ProcessId(u64);
 
 impl ProcessId {
@@ -25,42 +108,44 @@ impl ProcessId {
     }
 }
 
-// TODO: add a memory manager which manages the whole memory for the process
-// and has access to frame_allocator and page_table
-pub struct ProcessControlBlock {
+pub struct Process {
     id: ProcessId,
     name: String,
-    cr3: PhysicalAddress,
+    address_space: AddressSpace,
 }
 
-pub fn init(initial_kernel_stack: Stack) {
-    let (cr3, _) = Cr3::read();
-    let process = Arc::new(Mutex::new(ProcessControlBlock::new(
-        String::from("kernel_root"),
-        cr3.address(),
+impl Process {
+    pub fn new(name: String, cr3: PhysicalFrame, cr3_flags: Cr3Flags) -> Self {
+        Self {
+            id: ProcessId::new(),
+            name,
+            address_space: AddressSpace::new(cr3, cr3_flags),
+        }
+    }
+
+    pub fn id(&self) -> ProcessId {
+        self.id
+    }
+}
+
+pub fn init() {
+    let (cr3, cr3_flags) = Cr3::read();
+    let process = Arc::new(Mutex::new(Process::new(
+        String::from("colonel"),
+        cr3,
+        cr3_flags,
     )));
 
-    let thread = ThreadControlBlock::new(process.clone(), initial_kernel_stack);
+    let thread = Thread::new(process.clone());
 
     scheduler::init(process, thread);
 }
 
-impl ProcessControlBlock {
-    pub fn new(name: String, cr3: PhysicalAddress) -> Self {
-        Self {
-            id: ProcessId::new(),
-            name,
-            cr3,
-        }
-    }
-
-    pub fn cr3(&self) -> PhysicalAddress {
-        self.cr3
-    }
+pub fn create_kernel_thread(name: String, func: extern "C" fn()) {
+    let cur_process = scheduler::the().lock().current_process();
 }
 
 pub fn start_thread_in_current_process(name: String, func: extern "C" fn()) {
-    let cur_process = scheduler::val().lock().current_process();
 
     //let thread = ThreadControlBlock::new(cur_process.clone());
 }

@@ -3,8 +3,8 @@ use core::{cmp, marker::PhantomData, mem, ops::Add, ptr, slice};
 use elfloader::{arch::x86_64::RelocationTypes, *};
 use x86_64::{
     memory::{
-        Address, FrameAllocator, Page, PageSize, PhysicalAddress, PhysicalFrame, Size4KiB,
-        VirtualAddress,
+        Address, FrameAllocator, Page, PageRangeInclusive, PageSize, PhysicalAddress,
+        PhysicalFrame, Size4KiB, VirtualAddress,
     },
     paging::{
         mapped_page_table::MappedPageTable, Mapper, MapperAllSizes, PageTable, PageTableEntryFlags,
@@ -21,6 +21,7 @@ pub struct KernelLoader<'a, M, A> {
     info: &'a BiosInfo,
     page_table: &'a mut M,
     frame_allocator: &'a mut A,
+    max_page: Page,
 }
 
 /// Kernel binary was loaded into memory by stage2, here we just handle relocations
@@ -41,10 +42,11 @@ where
             info,
             page_table,
             frame_allocator,
+            max_page: Page::containing_address(VirtualAddress::new(0)),
         }
     }
 
-    pub fn load_kernel(&mut self, info: &BiosInfo) -> VirtualAddress {
+    pub fn load_kernel(&mut self, info: &BiosInfo) -> (VirtualAddress, PageRangeInclusive) {
         let kernel = unsafe {
             slice::from_raw_parts(info.kernel.start as *const u8, info.kernel.size as usize)
         };
@@ -53,7 +55,15 @@ where
 
         kernel_elf.load(self).expect("Can't load the binary?");
 
-        VirtualAddress::new(self.virtual_base + kernel_elf.entry_point())
+        let kernel_range = PageRangeInclusive::new(
+            Page::containing_address(VirtualAddress::new(self.virtual_base)),
+            self.max_page,
+        );
+
+        (
+            VirtualAddress::new(self.virtual_base + kernel_elf.entry_point()),
+            kernel_range,
+        )
     }
 
     // https://dram.page/p/relative-relocs-explained/
@@ -90,8 +100,8 @@ where
             };
 
             // Write spans two pages, so calculate amount of bytes for first page
-            let bytes_to_write = if virtual_address + value_bytes.len() > page.end() {
-                (page.end() - virtual_address) as usize
+            let bytes_to_write = if virtual_address + value_bytes.len() > page.end_address() {
+                (page.end_address() - virtual_address) as usize
             // Either we write the full 8 bytes, or the rest of the value on the second page
             } else {
                 value_bytes.len() - bytes_written
@@ -234,6 +244,10 @@ where
                 );
                 */
 
+                if page > self.max_page {
+                    self.max_page = page;
+                }
+
                 self.page_table
                     .map_to(frame, page, flags, self.frame_allocator)
                     .expect("Failed to map section")
@@ -299,6 +313,10 @@ where
 
                     unsafe {
                         core::ptr::write_bytes(frame.start() as *mut u8, 0, frame.size() as usize);
+                    }
+
+                    if page > self.max_page {
+                        self.max_page = page;
                     }
 
                     self.page_table

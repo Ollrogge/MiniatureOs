@@ -31,6 +31,12 @@
     + better but harder to implement
     + https://wiki.osdev.org/APIC_Timer
 
+## Next steps
++ ramdisk
++ virtual filesystem using ext2
++ elf loader user programs
++ userspace -> init elf
+
 ## Todos
 
 **Logging**
@@ -63,6 +69,7 @@
 + impove error handling
     + e.g. paging
 + don't just always use except. Pass errors in a smarter way, print errors where they originate
++ allocators
 
 **Threads / Processes**
 + implement a way to start kernel threads

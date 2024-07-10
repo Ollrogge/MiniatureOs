@@ -90,9 +90,11 @@ pub struct IntrusiveLinkedList {
     len: usize,
 }
 
+unsafe impl Send for IntrusiveLinkedList {}
+
 impl IntrusiveLinkedList {
     /// Creates a new, empty IntrusiveLinkedList.
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             head: None,
             tail: None,

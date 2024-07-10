@@ -2,7 +2,7 @@ use bit_field::BitField;
 use core::{
     fmt::{self, Display, Formatter, LowerHex, Result},
     marker::PhantomData,
-    ops::{Add, AddAssign, Rem, Sub},
+    ops::{Add, AddAssign, Range, Rem, Sub},
 };
 
 pub const KIB: u64 = 1024;
@@ -75,46 +75,57 @@ impl MemoryRegion for Region {
     }
 }
 
+pub struct PhysicalRange {
+    pub start: PhysicalAddress,
+    pub size: usize,
+}
+
+impl PhysicalRange {
+    pub fn new(start: PhysicalAddress, size: usize) -> Self {
+        Self { start, size }
+    }
+
+    pub fn start(&self) -> PhysicalAddress {
+        self.start
+    }
+
+    pub fn end(&self) -> PhysicalAddress {
+        self.start + self.size
+    }
+    fn contains(&self, address: PhysicalAddress) -> bool {
+        self.start() <= address && address < self.end()
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
-pub struct VirtualMemoryRegion {
+pub struct VirtualRange {
     pub start: VirtualAddress,
     pub size: usize,
 }
 
-impl VirtualMemoryRegion {
-    pub fn new(start: VirtualAddress, size: usize) -> Self {
+impl VirtualRange {
+    pub const fn new(start: VirtualAddress, size: usize) -> Self {
         Self { start, size }
     }
-}
 
-impl MemoryRegion for VirtualMemoryRegion {
-    fn start(&self) -> u64 {
-        self.start.as_u64()
+    pub const fn new_empty() -> Self {
+        Self {
+            start: VirtualAddress::new(0),
+            size: 0,
+        }
     }
 
-    fn end(&self) -> u64 {
-        self.start() + self.size as u64
+    pub fn start(&self) -> VirtualAddress {
+        self.start
     }
 
-    fn size(&self) -> usize {
-        self.size
+    pub fn end(&self) -> VirtualAddress {
+        self.start + self.size
     }
 
-    fn contains(&self, address: u64) -> bool {
-        self.start() <= address && address <= self.end()
-    }
-
-    fn is_usable(&self) -> bool {
-        true
-    }
-
-    fn set_start(&mut self, start: u64) {
-        self.start = VirtualAddress::new(start)
-    }
-
-    fn set_size(&mut self, size: usize) {
-        self.size = size
+    fn contains(&self, address: VirtualAddress) -> bool {
+        self.start() <= address && address < self.end()
     }
 }
 
@@ -182,6 +193,22 @@ impl MemoryRegion for PhysicalMemoryRegion {
 
     fn set_size(&mut self, size: usize) {
         self.size = size as u64
+    }
+}
+
+pub struct PageAlignedSize(usize);
+
+impl PageAlignedSize {
+    pub fn new(size: usize) -> Self {
+        Self(PageAlignedSize::align_up(size))
+    }
+
+    pub fn align_up(size: usize) -> usize {
+        (size + Size4KiB::SIZE - 1) & !(Size4KiB::SIZE - 1)
+    }
+
+    pub fn inner(&self) -> usize {
+        self.0
     }
 }
 
@@ -511,6 +538,12 @@ impl<S: PageSize> Display for PhysicalFrame<S> {
 }
 
 impl<S: PageSize> PhysicalFrame<S> {
+    pub const fn new() -> Self {
+        Self {
+            address: PhysicalAddress::new(0),
+            size: PhantomData,
+        }
+    }
     pub fn containing_address(address: PhysicalAddress) -> Self {
         Self {
             address: address.align_down(S::SIZE as u64),
@@ -628,39 +661,98 @@ impl<S: PageSize> Page<S> {
     }
 
     pub fn range_inclusive(start: Page<S>, end: Page<S>) -> PageRangeInclusive<S> {
-        PageRangeInclusive { start, end }
+        PageRangeInclusive {
+            start_page: start,
+            end_page: end,
+        }
     }
 
     pub fn size(self) -> usize {
         S::SIZE
     }
 
-    pub fn end(self) -> VirtualAddress {
-        self.address + S::SIZE
+    pub fn start_address(&self) -> VirtualAddress {
+        self.address
     }
 
-    pub fn start(self) -> u64 {
-        self.address.as_u64()
+    pub fn end_address(&self) -> VirtualAddress {
+        self.address + self.size()
     }
 
-    pub fn address(self) -> VirtualAddress {
+    pub fn address(&self) -> VirtualAddress {
         self.address
     }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct PageRangeInclusive<S: PageSize = Size4KiB> {
-    pub start: Page<S>,
-    pub end: Page<S>,
+    pub start_page: Page<S>,
+    pub end_page: Page<S>,
+}
+
+impl<S: PageSize> Into<Range<u64>> for PageRangeInclusive<S> {
+    fn into(self) -> Range<u64> {
+        self.start_page.start_address().as_u64()..self.end_page.end_address().as_u64()
+    }
+}
+
+impl<S: PageSize> PageRangeInclusive<S> {
+    pub fn new(start_page: Page<S>, end_page: Page<S>) -> Self {
+        Self {
+            start_page,
+            end_page,
+        }
+    }
+
+    pub const fn empty() -> Self {
+        Self {
+            start_page: Page {
+                address: VirtualAddress::new(0),
+                size: PhantomData,
+            },
+            end_page: Page {
+                address: VirtualAddress::new(0),
+                size: PhantomData,
+            },
+        }
+    }
+
+    pub fn start_page(&self) -> Page<S> {
+        self.start_page
+    }
+
+    pub fn end_page(&self) -> Page<S> {
+        self.end_page
+    }
+
+    pub fn start_address(&self) -> VirtualAddress {
+        self.start_page.address()
+    }
+
+    pub fn end_address(&self) -> VirtualAddress {
+        self.end_page.end_address()
+    }
+
+    pub fn contains(&self, range: &PageRangeInclusive) -> bool {
+        self.start_address() <= range.start_address() && self.end_address() >= range.end_address()
+    }
+
+    pub fn overlaps(&self, range: &PageRangeInclusive) -> bool {
+        !(self.end_address() < range.start_address() || self.start_address() > range.end_address())
+    }
+
+    pub fn size(&self) -> usize {
+        usize::try_from(self.end_page.end_address() - self.start_page.start_address()).unwrap()
+    }
 }
 
 impl<S: PageSize> Iterator for PageRangeInclusive<S> {
     type Item = Page<S>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.start <= self.end {
-            let frame = self.start;
-            self.start += 1;
+        if self.start_page <= self.end_page {
+            let frame = self.start_page;
+            self.start_page += 1;
             Some(frame)
         } else {
             None

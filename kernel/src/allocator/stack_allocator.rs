@@ -2,7 +2,7 @@ use core::default::Default;
 use x86_64::{
     memory::{
         FrameAllocator, MemoryRegion, Page, PageRangeInclusive, PageSize, Size4KiB, VirtualAddress,
-        VirtualMemoryRegion,
+        VirtualRange,
     },
     paging::{Mapper, PageTableEntryFlags},
 };
@@ -68,6 +68,10 @@ impl StackAllocator {
             _ => None,
         }
     }
+
+    pub fn dealloc_stack(stack: Stack) {
+        unimplemented!();
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -86,8 +90,8 @@ impl Stack {
     }
 }
 
-impl From<VirtualMemoryRegion> for Stack {
-    fn from(reg: VirtualMemoryRegion) -> Self {
+impl From<VirtualRange> for Stack {
+    fn from(reg: VirtualRange) -> Self {
         Stack::new(VirtualAddress::new(reg.end()), reg.size() as usize)
     }
 }

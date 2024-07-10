@@ -4,7 +4,7 @@
 #![feature(const_mut_refs)]
 use api::BootInfo;
 extern crate alloc;
-use core::iter::Copied;
+use core::{iter::Copied, ops::DerefMut};
 use x86_64::{
     memory::{Address, MemoryRegion, PhysicalMemoryRegion},
     paging::{
@@ -15,7 +15,9 @@ use x86_64::{
 };
 
 pub mod allocator;
+pub mod error;
 pub mod interrupts;
+pub mod memory;
 pub mod multitasking;
 pub mod paging;
 pub mod qemu;
@@ -23,10 +25,9 @@ pub mod serial;
 pub mod vga;
 
 use allocator::init_heap;
+use memory::manager::MemoryManager;
 
-pub fn kernel_init(
-    boot_info: &'static BootInfo,
-) -> Result<(LinkedListFrameAllocator, OffsetPageTable<PhysicalOffset>), ()> {
+pub fn kernel_init(boot_info: &'static BootInfo) -> Result<OffsetPageTable<PhysicalOffset>, ()> {
     println!("Initializing kernel");
     interrupts::init();
 
@@ -35,12 +36,11 @@ pub fn kernel_init(
     let pt_offset = PhysicalOffset::new(boot_info.physical_memory_offset);
     let mut page_table = OffsetPageTable::new(pml4t, pt_offset);
 
-    let mut frame_allocator = LinkedListFrameAllocator::new(
-        boot_info.memory_regions.iter().copied(),
-        boot_info.physical_memory_offset,
-    );
+    let mut memory_manager = MemoryManager::the().lock();
 
-    init_heap(&mut page_table, &mut frame_allocator);
+    memory_manager.init(boot_info);
 
-    Ok((frame_allocator, page_table))
+    init_heap(&mut page_table, memory_manager.frame_allocator());
+
+    Ok(page_table)
 }

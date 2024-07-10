@@ -5,7 +5,7 @@ use bump allocator for frame allocations for now. Only handle frame deallocation
 */
 use x86_64::{
     memory::{FrameAllocator, Page, Size4KiB, VirtualAddress},
-    paging::{Mapper, PageTableEntryFlags},
+    paging::{linked_list_frame_allocator::LinkedListFrameAllocator, Mapper, PageTableEntryFlags},
 };
 
 pub mod buddy_allocator;
