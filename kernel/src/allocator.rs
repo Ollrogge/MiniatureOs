@@ -4,12 +4,16 @@ use util::mutex::{Mutex, MutexGuard};
 use bump allocator for frame allocations for now. Only handle frame deallocations later
 */
 use x86_64::{
-    memory::{FrameAllocator, Page, Size4KiB, VirtualAddress},
+    memory::{FrameAllocator, Page, PageRangeInclusive, Size4KiB, VirtualAddress},
     paging::{linked_list_frame_allocator::LinkedListFrameAllocator, Mapper, PageTableEntryFlags},
 };
 
 pub mod buddy_allocator;
 pub mod stack_allocator;
+use crate::{
+    error::KernelError,
+    memory::{manager::MemoryManager, region::RegionType},
+};
 use buddy_allocator::BuddyAllocator;
 
 pub const HEAP_START: VirtualAddress = VirtualAddress::new(0x_4444_4444_0000);
@@ -18,7 +22,10 @@ pub const HEAP_SIZE: usize = 100 * 1024; // 100 KiB
 #[global_allocator]
 pub static ALLOCATOR: Locked<BuddyAllocator> = Locked::new(BuddyAllocator::new());
 
-pub fn init_heap<M, A>(page_table: &mut M, frame_allocator: &mut A)
+pub fn init_heap<M, A>(
+    page_table: &mut M,
+    frame_allocator: &mut A,
+) -> Result<PageRangeInclusive, KernelError>
 where
     M: Mapper<Size4KiB>,
     A: FrameAllocator<Size4KiB>,
@@ -58,6 +65,21 @@ where
 
     let mut allocator = ALLOCATOR.lock();
     allocator.init(HEAP_START, HEAP_SIZE);
+
+    Ok(PageRangeInclusive::new(
+        Page::containing_address(HEAP_START),
+        Page::containing_address(HEAP_START + HEAP_SIZE - 1usize),
+    ))
+
+    /*
+    MemoryManager::the().lock().add_memory_region(
+        RegionType::Heap,
+        PageRangeInclusive::new(
+            Page::containing_address(HEAP_START),
+            Page::containing_address(HEAP_START + HEAP_SIZE - 1usize),
+        ),
+    );
+    */
 }
 
 pub struct Locked<A> {

@@ -2,7 +2,9 @@ use super::{
     process::Process,
     thread::{Thread, ThreadState},
 };
-use crate::allocator::stack_allocator::Stack;
+use crate::{
+    allocator::stack_allocator::Stack, memory::virtual_memory_object::VirtualMemoryObject,
+};
 use alloc::{collections::VecDeque, string::String, sync::Arc, vec::Vec};
 use core::arch::asm;
 use lazy_static::lazy_static;
@@ -11,28 +13,22 @@ use x86_64::memory::{Address, PhysicalAddress, VirtualAddress};
 
 lazy_static! {
     static ref SCHEDULER: Mutex<Scheduler> = {
-        let dummy_process = Arc::new(Mutex::new(Process::new(
-            String::new(),
-            PhysicalAddress::new(0),
-        )));
-        let dummy_thread = Thread::new(dummy_process);
-
         Mutex::new(Scheduler {
             ready_threads: VecDeque::new(),
-            running_thread: dummy_thread,
+            running_thread: None,
         })
     };
 }
 
-pub fn init(process: Arc<Mutex<Process>>, mut thread: Thread) {
+pub fn init(mut thread: Thread) {
     let mut scheduler = SCHEDULER.lock();
     thread.set_state(ThreadState::Running);
-    scheduler.running_thread = thread;
+    scheduler.init(thread);
 }
 
 pub struct Scheduler {
     ready_threads: VecDeque<Thread>,
-    running_thread: Thread,
+    running_thread: Option<Thread>,
 }
 
 pub fn the() -> &'static Mutex<Scheduler> {
@@ -44,24 +40,28 @@ impl Scheduler {
         self.ready_threads.push_back(thread);
     }
 
+    pub fn init(&mut self, thread: Thread) {
+        self.running_thread = Some(thread);
+    }
+
     pub fn schedule(&mut self) {
         if let Some(new_thread) = self.ready_threads.pop_front() {
-            let old = self.running_thread.clone();
-            let old_cr3 = old.cr3();
-            self.running_thread = new_thread;
+            let old = self.running_thread.take().unwrap();
+            let old_cr3 = old.address_space().cr3;
+
+            let new_cr3 = new_thread.address_space().cr3;
+
+            let new_rsp = new_thread.last_stack_ptr().as_u64();
+            let old_rsp = old.last_stack_ptr().as_mut_ptr();
+
             self.ready_threads.push_back(old);
-
-            let new_cr3 = self.running_thread.cr3();
-
-            let new_rsp = self.running_thread.stack_top();
-            let old_rsp = unsafe { self.ready_threads.back_mut().unwrap().stack_top_ptr() };
-
-            unsafe { task_switch(old_rsp, new_rsp, old_cr3.as_u64(), new_cr3.as_u64()) };
+            self.running_thread = Some(new_thread);
+            unsafe { task_switch(old_rsp, new_rsp, old_cr3, new_cr3) };
         }
     }
 
     pub fn current_process(&self) -> &Arc<Mutex<Process>> {
-        &self.running_thread.process
+        &self.running_thread.as_ref().unwrap().process
     }
 }
 

@@ -744,6 +744,10 @@ impl<S: PageSize> PageRangeInclusive<S> {
     pub fn size(&self) -> usize {
         usize::try_from(self.end_page.end_address() - self.start_page.start_address()).unwrap()
     }
+
+    pub fn len(&self) -> usize {
+        self.size() / S::SIZE
+    }
 }
 
 impl<S: PageSize> Iterator for PageRangeInclusive<S> {

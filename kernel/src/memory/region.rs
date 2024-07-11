@@ -1,6 +1,5 @@
 use super::{virtual_memory_object::VirtualMemoryObject, MemoryError};
 use alloc::{collections::BTreeMap, string::String, vec::Vec};
-use core::future::join;
 use util::range_allocator::{self, RangeAllocator};
 use x86_64::memory::{
     Address, Page, PageAlignedSize, PageRangeInclusive, Region, Size4KiB, VirtualAddress,
@@ -56,7 +55,28 @@ impl RegionTree {
         self.regions.push(info);
     }
 
-    pub fn try_allocate_region(
+    pub fn try_allocate_range_in_region(
+        &mut self,
+        name: String,
+        typ: RegionType,
+        range: PageRangeInclusive,
+    ) -> Result<(), MemoryError> {
+        if let Some(region_info) = self.regions.iter_mut().find(|r| r.typ == typ) {
+            let res = region_info
+                .allocator
+                .try_allocate_range(range.clone().into());
+            if !res {
+                Err(MemoryError::InvalidRange)
+            } else {
+                region_info.subregions.insert(name, range);
+                Ok(())
+            }
+        } else {
+            Err(MemoryError::Other)
+        }
+    }
+
+    pub fn try_allocate_size_in_region(
         &mut self,
         name: String,
         typ: RegionType,
@@ -89,7 +109,7 @@ impl RegionTree {
         }
     }
 
-    pub fn try_deallocate_region(
+    pub fn try_deallocate_from_region(
         &mut self,
         name: String,
         typ: RegionType,

@@ -1,3 +1,3 @@
 #!/bin/sh
 
-cargo build --target x86_64-unknown-none --features kernel
+cargo build --target x86_64-unknown-none

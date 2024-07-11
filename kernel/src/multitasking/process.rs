@@ -1,9 +1,16 @@
 use super::{scheduler, thread::Thread};
 use crate::{
     allocator::stack_allocator::{Stack, StackAllocator},
-    memory::address_space::{self, AddressSpace},
+    error::KernelError,
+    memory::{
+        address_space::{self, AddressSpace},
+        manager::MemoryManager,
+        region::{RegionType, VirtualMemoryRegion},
+        virtual_memory_object::MemoryBackedVirtualMemoryObject,
+    },
 };
-use alloc::{collections::BTreeMap, string::String, sync::Arc};
+use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
+use api::BootInfo;
 use core::{
     arch::asm,
     sync::atomic::{AtomicU64, Ordering::Relaxed},
@@ -13,6 +20,7 @@ use x86_64::{
     memory::{
         Page, PageRangeInclusive, PhysicalAddress, PhysicalFrame, Size4KiB, VirtualAddress, KIB,
     },
+    paging::Translator,
     register::{Cr3, Cr3Flags},
 };
 /**
@@ -115,30 +123,60 @@ pub struct Process {
 }
 
 impl Process {
-    pub fn new(name: String, cr3: PhysicalFrame, cr3_flags: Cr3Flags) -> Self {
+    pub fn new(name: String, cr3: u64) -> Self {
         Self {
             id: ProcessId::new(),
             name,
-            address_space: AddressSpace::new(cr3, cr3_flags),
+            address_space: AddressSpace::new(cr3),
         }
     }
 
     pub fn id(&self) -> ProcessId {
         self.id
     }
+
+    pub fn address_space(&self) -> AddressSpace {
+        self.address_space
+    }
 }
 
-pub fn init() {
-    let (cr3, cr3_flags) = Cr3::read();
+pub fn init(boot_info: &'static BootInfo) -> Result<(), KernelError> {
     let process = Arc::new(Mutex::new(Process::new(
         String::from("colonel"),
-        cr3,
-        cr3_flags,
+        Cr3::read_raw(),
     )));
 
-    let thread = Thread::new(process.clone());
+    let mut memory_manager = MemoryManager::the().lock();
 
-    scheduler::init(process, thread);
+    let mut kernel_stack_boot_frames = Vec::new();
+    let page_table = memory_manager.kernel_page_table();
+    for page in boot_info.kernel_stack {
+        let (frame, _) = page_table.translate(page)?;
+        kernel_stack_boot_frames.push(frame);
+    }
+
+    let obj = MemoryBackedVirtualMemoryObject::new(kernel_stack_boot_frames);
+
+    MemoryManager::the()
+        .lock()
+        .region_tree()
+        .try_allocate_range_in_region(
+            String::from("kernel_stack_boot"),
+            RegionType::Stack,
+            boot_info.kernel_stack.clone(),
+        )?;
+
+    let region = VirtualMemoryRegion::new(
+        boot_info.kernel_stack.clone(),
+        String::from("kernel_stack_boot"),
+        obj,
+    );
+
+    let thread = Thread::new(process.clone(), region, VirtualAddress::new(0));
+
+    scheduler::init(thread);
+
+    Ok(())
 }
 
 pub fn create_kernel_thread(name: String, func: extern "C" fn()) {

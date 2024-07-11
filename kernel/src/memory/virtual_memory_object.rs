@@ -1,5 +1,5 @@
-use super::manager::{AllocationStrategy, MemoryError};
-use crate::memory::manager::MemoryManager;
+use super::manager::AllocationStrategy;
+use crate::memory::{manager::MemoryManager, MemoryError};
 use alloc::vec::Vec;
 use x86_64::memory::{PageAlignedSize, PageSize, PhysicalFrame, Size4KiB};
 pub trait VirtualMemoryObject {
@@ -13,21 +13,23 @@ pub struct MemoryBackedVirtualMemoryObject {
 }
 
 impl MemoryBackedVirtualMemoryObject {
-    // ignore startegy for now. we always allocate frame immediately
+    pub fn new(frames: Vec<PhysicalFrame>) -> Self {
+        Self { frames }
+    }
+    // ignore strategy for now. we always allocate frame immediately
     pub fn create(
-        size: usize,
-        strategy: AllocationStrategy,
+        size: PageAlignedSize,
+        _: AllocationStrategy,
     ) -> Result<MemoryBackedVirtualMemoryObject, MemoryError> {
-        assert!(
-            size % Size4KiB::SIZE == 0,
-            "MemoryBackedVirtualMemoryObject needs to be multiple of page size"
-        );
-
         let frames = MemoryManager::the()
             .lock()
-            .try_allocate_frames(size / Size4KiB::SIZE)?;
+            .try_allocate_frames(size.inner())?;
 
         Ok(Self { frames })
+    }
+
+    pub fn frames(&self) -> &Vec<PhysicalFrame> {
+        &self.frames
     }
 }
 

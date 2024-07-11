@@ -90,12 +90,6 @@ impl Stack {
     }
 }
 
-impl From<VirtualRange> for Stack {
-    fn from(reg: VirtualRange) -> Self {
-        Stack::new(VirtualAddress::new(reg.end()), reg.size() as usize)
-    }
-}
-
 impl Default for Stack {
     fn default() -> Self {
         Self {

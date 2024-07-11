@@ -3,13 +3,13 @@ use x86_64::{
     register::{Cr3, Cr3Flags},
 };
 
+#[derive(Clone, Copy)]
 pub struct AddressSpace {
-    cr3: PhysicalFrame,
-    cr3_flags: Cr3Flags,
+    pub cr3: u64,
 }
 
 impl AddressSpace {
-    pub fn new(cr3: PhysicalFrame, cr3_flags: Cr3Flags) -> Self {
-        Self { cr3, cr3_flags }
+    pub fn new(cr3: u64) -> Self {
+        Self { cr3 }
     }
 }

@@ -176,7 +176,7 @@ fn start(info: &'static BootInfo) -> ! {
 
     trigger_int3();
 
-    process::init(info.kernel_stack.into());
+    process::init(info);
 
     hlt_loop();
     //trigger_page_fault();
