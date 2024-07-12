@@ -2,6 +2,7 @@
 #![no_main]
 #![feature(naked_functions)]
 #![feature(const_mut_refs)]
+use alloc::string::String;
 use api::{BootInfo, PhysicalMemoryRegions};
 use core::{alloc::Layout, arch::asm, mem::size_of, panic::PanicInfo};
 use kernel::{
@@ -168,23 +169,34 @@ fn start(info: &'static BootInfo) -> ! {
     let _ = kernel_init(info).expect("Error while trying to initialize kernel");
     println!("Kernel initialized");
 
-    unsafe { test_buddy_allocator() };
-    println!("Buddy allocator tested");
+    //unsafe { test_buddy_allocator() };
+    //println!("Buddy allocator tested");
 
-    test_heap_allocations();
-    println!("Heap tested");
+    //test_heap_allocations();
+    //println!("Heap tested");
 
     trigger_int3();
 
-    process::init(info);
+    process::init(info).unwrap();
+    println!("Processes initialized, spawning idle thread");
+
+    process::spawn_kernel_thread(String::from("idle_thread"), idle_thread_func).unwrap();
+
+    loop {
+        hlt();
+        println!("Colonel thread");
+    }
 
     hlt_loop();
     //trigger_page_fault();
     //stack_overflow();
 }
 
-pub extern "C" fn idle_thread() -> ! {
-    println!("Idle thread running");
+pub extern "C" fn idle_thread_func() -> ! {
+    loop {
+        println!("Idle thread");
+        hlt();
+    }
 
     loop {}
 }

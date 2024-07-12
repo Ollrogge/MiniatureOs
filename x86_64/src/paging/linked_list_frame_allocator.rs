@@ -44,17 +44,19 @@ impl LinkedListFrameAllocator {
             let end_page =
                 Page::containing_address(VirtualAddress::new(end - 1u64 + offset as u64));
 
-            Page::range_inclusive(start_page, end_page).for_each(|page| {
-                //serial_println!("Pushing to list: {:#x}", frame.start());
-                let node = unsafe {
-                    ListNode::new_at_address(
-                        usize::try_from(page.start_address().as_u64()).unwrap(),
-                    )
-                };
+            Page::range_inclusive(start_page, end_page)
+                .iter()
+                .for_each(|page| {
+                    //serial_println!("Pushing to list: {:#x}", frame.start());
+                    let node = unsafe {
+                        ListNode::new_at_address(
+                            usize::try_from(page.start_address().as_u64()).unwrap(),
+                        )
+                    };
 
-                self.free_list.push_front(node);
-                sz += 1;
-            });
+                    self.free_list.push_front(node);
+                    sz += 1;
+                });
         });
 
         self.free_list_size = sz;

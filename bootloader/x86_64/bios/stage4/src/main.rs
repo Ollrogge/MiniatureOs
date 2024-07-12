@@ -32,8 +32,8 @@ use x86_64::{
 
 // hardcoded for now
 const KERNEL_VIRTUAL_BASE: VirtualAddress = VirtualAddress::new(0xffffffff80000000);
-//const KERNEL_STACK_TOP: u64 = 0xffffffff00000000;
-const KERNEL_STACK_TOP: VirtualAddress = VirtualAddress::new(0xffffffff00000000);
+const KERNEL_STACK_BASE: VirtualAddress = VirtualAddress::new(0xffffffff00000000);
+// size includes guard page
 const KERNEL_STACK_SIZE: usize = 128 * KIB as usize;
 // map the complete physical address space at this offset in order to enable
 // the kernel to easily access the page table
@@ -77,15 +77,26 @@ fn context_switch(page_table: u64, stack_top: u64, entry_point: u64, boot_info: 
     unreachable!();
 }
 
-fn allocate_and_map_stack<A, M>(frame_allocator: &mut A, page_table: &mut M) -> VirtualAddress
+fn allocate_and_map_stack<A, M>(frame_allocator: &mut A, page_table: &mut M) -> PageRangeInclusive
 where
     A: FrameAllocator<Size4KiB>,
     M: Mapper<Size4KiB>,
 {
-    let end_page = Page::containing_address(KERNEL_STACK_TOP - 1u64);
-    // grows downwards
-    let start_page = Page::containing_address(KERNEL_STACK_TOP - KERNEL_STACK_SIZE);
-    for page in Page::range_inclusive(start_page, end_page) {
+    // stack grows downwards so guard page at base
+    let guard_page = Page::containing_address(KERNEL_STACK_BASE);
+    page_table
+        .map_to(
+            PhysicalFrame::containing_address(PhysicalAddress::new(0)),
+            guard_page,
+            PageTableEntryFlags::NONE,
+            frame_allocator,
+        )
+        .expect("Failed to map guard page")
+        .ignore();
+
+    let start_page = Page::containing_address(KERNEL_STACK_BASE + Size4KiB::SIZE);
+    let end_page = Page::containing_address(KERNEL_STACK_BASE + KERNEL_STACK_SIZE - 1u64);
+    for page in Page::range_inclusive(start_page, end_page).iter() {
         let frame = frame_allocator
             .allocate_frame()
             .expect("Failed to allocate frame for stack");
@@ -100,24 +111,7 @@ where
             .ignore();
     }
 
-    // catch kernel stack overflows
-    let guard_page = Page::containing_address(start_page.address - Size4KiB::SIZE);
-    assert!(guard_page != start_page);
-    let frame = frame_allocator
-        .allocate_frame()
-        .expect("Failed to allocate frame for guard page");
-
-    page_table
-        .map_to(
-            frame,
-            guard_page,
-            PageTableEntryFlags::NONE,
-            frame_allocator,
-        )
-        .expect("Failed to map guard page")
-        .ignore();
-
-    KERNEL_STACK_TOP
+    Page::range_inclusive(guard_page, end_page)
 }
 
 // identity-map context switch function, so that we don't get an immediate pagefault
@@ -233,6 +227,7 @@ fn allocate_and_map_boot_info<A, M>(
     info: &BiosInfo,
     e820_memory_map: &[E820MemoryRegion],
     kernel_virtual_range: PageRangeInclusive,
+    kernel_stack_range: PageRangeInclusive,
 ) -> VirtualAddress
 where
     A: FrameAllocator<Size4KiB>,
@@ -270,14 +265,9 @@ where
     let memory_regions =
         PhysicalMemoryRegions::new(memory_regions_ptr, usable_memory_regions_amount);
 
-    let kernel_stack = PageRangeInclusive::new(
-        Page::containing_address(KERNEL_STACK_TOP - KERNEL_STACK_SIZE),
-        Page::containing_address(KERNEL_STACK_TOP),
-    );
-
     let boot_info = BootInfo::new(
         kernel_virtual_range,
-        kernel_stack,
+        kernel_stack_range,
         info.framebuffer,
         memory_regions,
         PHYSICAL_MEMORY_OFFSET,
@@ -315,7 +305,7 @@ fn map_complete_physical_memory_space_at_an_offset_into_kernel<A, M>(
     // check 2MiB alignment
     assert!(offset % alignment == 0);
 
-    for frame in PhysicalFrame::<Size2MiB>::range_inclusive(start, end) {
+    for frame in PhysicalFrame::<Size2MiB>::range_inclusive(start, end).iter() {
         let page = Page::containing_address(VirtualAddress::new(offset as u64 + frame.start()));
 
         let flags = PageTableEntryFlags::PRESENT
@@ -341,9 +331,6 @@ fn enable_write_protect_bit() {
     unsafe {
         Cr0::update(|val| *val |= Cr0Flags::WRITE_PROTECT);
     }
-}
-fn trigger_page_fault() {
-    unsafe { *(0xdeabeefdead as *mut u8) = 42 };
 }
 
 fn start(info: &BiosInfo) -> ! {
@@ -387,7 +374,7 @@ fn start(info: &BiosInfo) -> ! {
     );
     let (kernel_entry_point, kernel_virtual_range) = loader.load_kernel(info);
 
-    let stack_top = allocate_and_map_stack(&mut allocator, &mut page_table);
+    let kernel_stack_range = allocate_and_map_stack(&mut allocator, &mut page_table);
 
     identity_map_context_switch_function(&mut allocator, &mut page_table);
 
@@ -399,7 +386,7 @@ fn start(info: &BiosInfo) -> ! {
     let end_frame: PhysicalFrame<Size4KiB> =
         PhysicalFrame::containing_address(PhysicalAddress::new(0xc0000 - 1));
 
-    for frame in PhysicalFrame::range_inclusive(start_frame, end_frame) {
+    for frame in PhysicalFrame::range_inclusive(start_frame, end_frame).iter() {
         page_table
             .identity_map(
                 frame,
@@ -418,7 +405,18 @@ fn start(info: &BiosInfo) -> ! {
         PHYSICAL_MEMORY_OFFSET,
     );
 
-    // IMPORTANT: No more allocations should be done after the boot info has been allocated.
+    // catch NULL derefs
+    page_table
+        .map_to(
+            PhysicalFrame::<Size4KiB>::containing_address(PhysicalAddress::new(0)),
+            Page::<Size4KiB>::containing_address(VirtualAddress::new(0)),
+            PageTableEntryFlags::NONE,
+            &mut allocator,
+        )
+        .unwrap()
+        .ignore();
+
+    // IMPORTANT: No more frame allocations should be done after the boot info has been allocated.
     // Otherwise memory regions information is incorrect
     let boot_info_address = allocate_and_map_boot_info(
         &mut allocator,
@@ -426,6 +424,7 @@ fn start(info: &BiosInfo) -> ! {
         &info,
         memory_map,
         kernel_virtual_range,
+        kernel_stack_range,
     );
 
     // todo: detect RSDP (Root System Description Pointer)
@@ -437,7 +436,7 @@ fn start(info: &BiosInfo) -> ! {
 
     context_switch(
         kernel_page_table_frame.start(),
-        stack_top.as_u64(),
+        kernel_stack_range.end_page().end_address().as_u64(),
         kernel_entry_point.as_u64(),
         boot_info_address.as_u64(),
     );

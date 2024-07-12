@@ -1,4 +1,4 @@
-use crate::{print, println, serial_print, serial_println};
+use crate::{multitasking::scheduler::schedule, print, println, serial_print, serial_println};
 use bitflags::bitflags;
 use core::{
     arch::asm,
@@ -242,9 +242,10 @@ extern "C" fn double_fault_handler(frame: &ExceptionStackFrame, _error_code: u64
 }
 
 extern "C" fn timer_interrupt_handler(_frame: &ExceptionStackFrame) {
-    print!(".");
     PICS.lock()
         .notify_end_of_interrupt(InterruptIndex::Timer.as_remapped_idt_number());
+
+    schedule();
 }
 
 extern "C" fn keyboard_interrupt_handler(_frame: &ExceptionStackFrame) {

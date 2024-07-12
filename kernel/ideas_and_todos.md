@@ -65,6 +65,11 @@
 + don't need to map a guard page without any option (unmapped basically same)
 + just need to make sure it isnt allocated anymore
 
+
+**Physicalframe**
++ why is it generic over PageSize ? there can only be frames
+with a size of 4KiB
+
 **Error handling**
 + impove error handling
     + e.g. paging
@@ -83,3 +88,8 @@
 
 **Filesystem**
 +  basic ext2 implementation using a node graph.
++ https://www.youtube.com/watch?v=vHRd9QRYQBA
+
+**Datastructures**
++ OnceCell
+ + A cell which can be written to only once

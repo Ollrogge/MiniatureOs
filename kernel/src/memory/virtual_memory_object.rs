@@ -18,12 +18,11 @@ impl MemoryBackedVirtualMemoryObject {
     }
     // ignore strategy for now. we always allocate frame immediately
     pub fn create(
+        memory_manager: &mut MemoryManager,
         size: PageAlignedSize,
         _: AllocationStrategy,
     ) -> Result<MemoryBackedVirtualMemoryObject, MemoryError> {
-        let frames = MemoryManager::the()
-            .lock()
-            .try_allocate_frames(size.inner())?;
+        let frames = memory_manager.try_allocate_frames(size.in_pages())?;
 
         Ok(Self { frames })
     }

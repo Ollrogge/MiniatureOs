@@ -196,19 +196,31 @@ impl MemoryRegion for PhysicalMemoryRegion {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct PageAlignedSize(usize);
 
 impl PageAlignedSize {
-    pub fn new(size: usize) -> Self {
+    pub const fn new(size: usize) -> Self {
         Self(PageAlignedSize::align_up(size))
     }
 
-    pub fn align_up(size: usize) -> usize {
+    pub const fn align_up(size: usize) -> usize {
         (size + Size4KiB::SIZE - 1) & !(Size4KiB::SIZE - 1)
     }
 
-    pub fn inner(&self) -> usize {
+    pub fn in_bytes(&self) -> usize {
         self.0
+    }
+
+    pub fn in_pages(&self) -> usize {
+        self.0 / Size4KiB::SIZE
+    }
+}
+
+impl Add<usize> for PageAlignedSize {
+    type Output = Self;
+    fn add(self, rhs: usize) -> Self::Output {
+        Self(Self::align_up(self.0 + rhs))
     }
 }
 
@@ -581,6 +593,34 @@ pub struct PhysicalFrameRangeInclusive<S: PageSize = Size4KiB> {
     pub end: PhysicalFrame<S>,
 }
 
+impl<S: PageSize> PhysicalFrameRangeInclusive<S> {
+    pub fn iter(&self) -> FrameRangeInclusiveIter<S> {
+        FrameRangeInclusiveIter {
+            current_frame: self.start,
+            end_frame: self.end,
+        }
+    }
+}
+
+pub struct FrameRangeInclusiveIter<S: PageSize = Size4KiB> {
+    current_frame: PhysicalFrame<S>,
+    end_frame: PhysicalFrame<S>,
+}
+
+impl<S: PageSize> Iterator for FrameRangeInclusiveIter<S> {
+    type Item = PhysicalFrame<S>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current_frame <= self.end_frame {
+            let frame = self.current_frame;
+            self.current_frame += 1;
+            Some(frame)
+        } else {
+            None
+        }
+    }
+}
+
 impl<S: PageSize> Iterator for PhysicalFrameRangeInclusive<S> {
     type Item = PhysicalFrame<S>;
 
@@ -696,6 +736,15 @@ impl<S: PageSize> Into<Range<u64>> for PageRangeInclusive<S> {
     }
 }
 
+impl<S: PageSize> From<PageRangeInclusiveIter<S>> for PageRangeInclusive<S> {
+    fn from(iter: PageRangeInclusiveIter<S>) -> Self {
+        PageRangeInclusive {
+            start_page: iter.current_page,
+            end_page: iter.end_page,
+        }
+    }
+}
+
 impl<S: PageSize> PageRangeInclusive<S> {
     pub fn new(start_page: Page<S>, end_page: Page<S>) -> Self {
         Self {
@@ -748,22 +797,43 @@ impl<S: PageSize> PageRangeInclusive<S> {
     pub fn len(&self) -> usize {
         self.size() / S::SIZE
     }
+
+    pub fn iter(&self) -> PageRangeInclusiveIter<S> {
+        PageRangeInclusiveIter {
+            current_page: self.start_page,
+            end_page: self.end_page,
+        }
+    }
+}
+pub struct PageRangeInclusiveIter<S: PageSize = Size4KiB> {
+    pub current_page: Page<S>,
+    pub end_page: Page<S>,
 }
 
-impl<S: PageSize> Iterator for PageRangeInclusive<S> {
+impl<S: PageSize> From<PageRangeInclusive<S>> for PageRangeInclusiveIter<S> {
+    fn from(range: PageRangeInclusive<S>) -> Self {
+        PageRangeInclusiveIter {
+            current_page: range.start_page,
+            end_page: range.end_page,
+        }
+    }
+}
+
+impl<S: PageSize> Iterator for PageRangeInclusiveIter<S> {
     type Item = Page<S>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.start_page <= self.end_page {
-            let frame = self.start_page;
-            self.start_page += 1;
-            Some(frame)
+        if self.current_page <= self.end_page {
+            let page = self.current_page;
+            self.current_page += 1;
+            Some(page)
         } else {
             None
         }
     }
 }
 
+// adding to a page will increase by pagesize
 impl<S: PageSize> Add<u64> for Page<S> {
     type Output = Self;
     fn add(self, rhs: u64) -> Self::Output {

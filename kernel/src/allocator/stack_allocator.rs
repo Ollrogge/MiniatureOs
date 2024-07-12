@@ -26,23 +26,23 @@ impl StackAllocator {
         A: FrameAllocator<Size4KiB>,
         M: Mapper<Size4KiB>,
     {
-        let mut range = self.page_range.clone();
+        let mut range_iter = self.page_range.clone().iter();
 
-        let guard_page = range.next();
-        let stack_start = range.next();
+        let guard_page = range_iter.next();
+        let stack_start = range_iter.next();
         let stack_end = if pages_cnt == 1 {
             stack_start
         } else {
             // choose the (size_in_pages-2)th element, since index
             // starts at 0 and we already allocated the start page
-            range.nth(pages_cnt - 2)
+            range_iter.nth(pages_cnt - 2)
         };
 
         match (guard_page, stack_start, stack_end) {
             (Some(_), Some(start), Some(end)) => {
-                self.page_range = range;
+                self.page_range = range_iter.into();
 
-                for page in Page::range_inclusive(start, end) {
+                for page in Page::range_inclusive(start, end).iter() {
                     let frame = frame_allocator
                         .allocate_frame()
                         .expect("Alloc stack: faile to alloc frame");

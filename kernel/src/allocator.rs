@@ -33,7 +33,7 @@ where
     // map heap range
     let start_page = Page::containing_address(HEAP_START);
     let end_page = Page::containing_address(HEAP_START + HEAP_SIZE - 1usize);
-    for page in Page::range_inclusive(start_page, end_page) {
+    for page in Page::range_inclusive(start_page, end_page).iter() {
         let frame = frame_allocator
             .allocate_frame()
             .expect("Failed to allocate frame for kernel heap");

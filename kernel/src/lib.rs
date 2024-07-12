@@ -28,10 +28,7 @@ pub mod vga;
 use memory::manager::MemoryManager;
 
 pub fn kernel_init(boot_info: &'static BootInfo) -> Result<(), KernelError> {
-    println!("Initializing kernel");
-
     MemoryManager::the().lock().init(boot_info)?;
-
     interrupts::init();
 
     Ok(())

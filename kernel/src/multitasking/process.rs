@@ -1,13 +1,17 @@
-use super::{scheduler, thread::Thread};
+use super::{
+    scheduler::Scheduler,
+    thread::{Thread, ThreadEntryFunc},
+};
 use crate::{
     allocator::stack_allocator::{Stack, StackAllocator},
     error::KernelError,
     memory::{
         address_space::{self, AddressSpace},
-        manager::MemoryManager,
+        manager::{AllocationStrategy, MemoryManager},
         region::{RegionType, VirtualMemoryRegion},
         virtual_memory_object::MemoryBackedVirtualMemoryObject,
     },
+    serial_println,
 };
 use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 use api::BootInfo;
@@ -18,12 +22,14 @@ use core::{
 use util::mutex::{Mutex, MutexGuard};
 use x86_64::{
     memory::{
-        Page, PageRangeInclusive, PhysicalAddress, PhysicalFrame, Size4KiB, VirtualAddress, KIB,
+        Page, PageAlignedSize, PageRangeInclusive, PhysicalAddress, PhysicalFrame, Size4KiB,
+        VirtualAddress, KIB,
     },
-    paging::Translator,
+    paging::{PageTableEntryFlags, Translator},
     register::{Cr3, Cr3Flags},
 };
 /**
+ *  https://www.youtube.com/watch?v=3xgOybGlYes&t=1090s
  *
  * The complete memory management is handled by the MemoryManager. It allocates
  * frames, handles page faults etc
@@ -84,7 +90,7 @@ use x86_64::{
  */
 
 static PROCESS_TREE: Mutex<ProcessTree> = Mutex::new(ProcessTree::new());
-const DEFAULT_STACK_SIZE: usize = 32 * KIB as usize;
+const DEFAULT_STACK_SIZE: PageAlignedSize = PageAlignedSize::new(32 * KIB as usize);
 
 struct ProcessTree {
     inner: BTreeMap<ProcessId, Arc<Mutex<Process>>>,
@@ -150,40 +156,56 @@ pub fn init(boot_info: &'static BootInfo) -> Result<(), KernelError> {
 
     let mut kernel_stack_boot_frames = Vec::new();
     let page_table = memory_manager.kernel_page_table();
-    for page in boot_info.kernel_stack {
+    // skip guard page
+    for page in boot_info.kernel_stack.iter().skip(1) {
         let (frame, _) = page_table.translate(page)?;
         kernel_stack_boot_frames.push(frame);
     }
 
     let obj = MemoryBackedVirtualMemoryObject::new(kernel_stack_boot_frames);
 
-    MemoryManager::the()
-        .lock()
-        .region_tree()
-        .try_allocate_range_in_region(
-            String::from("kernel_stack_boot"),
-            RegionType::Stack,
-            boot_info.kernel_stack.clone(),
-        )?;
+    memory_manager.region_tree().try_allocate_range_in_region(
+        String::from("kernel_stack_boot"),
+        RegionType::Stack,
+        boot_info.kernel_stack.clone(),
+    )?;
 
-    let region = VirtualMemoryRegion::new(
+    let stack = VirtualMemoryRegion::new(
         boot_info.kernel_stack.clone(),
         String::from("kernel_stack_boot"),
         obj,
+        true,
     );
 
-    let thread = Thread::new(process.clone(), region, VirtualAddress::new(0));
+    let thread = Thread::colonel_thread(String::from("colonel_thread"), process, stack);
 
-    scheduler::init(thread);
+    Scheduler::init(thread);
 
     Ok(())
 }
 
-pub fn create_kernel_thread(name: String, func: extern "C" fn()) {
-    let cur_process = scheduler::the().lock().current_process();
+fn try_create_stack_thread(
+    name: String,
+) -> Result<VirtualMemoryRegion<MemoryBackedVirtualMemoryObject>, KernelError> {
+    MemoryManager::the()
+        .lock()
+        .allocate_kernel_region_with_size(
+            DEFAULT_STACK_SIZE,
+            name,
+            RegionType::Stack,
+            PageTableEntryFlags::WRITABLE
+                | PageTableEntryFlags::PRESENT
+                | PageTableEntryFlags::NO_EXECUTE,
+            AllocationStrategy::AllocateNow,
+        )
 }
 
-pub fn start_thread_in_current_process(name: String, func: extern "C" fn()) {
+pub fn spawn_kernel_thread(name: String, func: ThreadEntryFunc) -> Result<(), KernelError> {
+    let cur_process = unsafe { Scheduler::the().current_process() };
+    let thread_stack = try_create_stack_thread(name.clone())?;
+    let thread = Thread::new(name, cur_process, thread_stack, func);
 
-    //let thread = ThreadControlBlock::new(cur_process.clone());
+    unsafe { Scheduler::the().add_thread(thread) };
+
+    Ok(())
 }

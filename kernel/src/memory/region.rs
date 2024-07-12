@@ -11,7 +11,7 @@ pub enum AccessType {
     ReadWrite,
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Copy)]
 pub enum RegionType {
     Stack,
     Heap,
@@ -83,14 +83,14 @@ impl RegionTree {
         size: PageAlignedSize,
         _: PlacingStrategy,
     ) -> Result<PageRangeInclusive, MemoryError> {
-        if size.inner() == 0 {
+        if size.in_bytes() == 0 {
             return Err(MemoryError::InvalidSize);
         }
 
         if let Some(region_info) = self.regions.iter_mut().find(|r| r.typ == typ) {
             let res = region_info
                 .allocator
-                .try_allocate_size(size.inner())
+                .try_allocate_size(size.in_bytes())
                 .map(|x| {
                     PageRangeInclusive::new(
                         Page::<Size4KiB>::containing_address(VirtualAddress::new(x.start)),
@@ -130,18 +130,36 @@ pub struct VirtualMemoryRegion<U: VirtualMemoryObject> {
     range: PageRangeInclusive,
     name: String,
     obj: U,
+    contains_guard_page: bool,
 }
 
 impl<U: VirtualMemoryObject> VirtualMemoryRegion<U> {
-    pub fn new(range: PageRangeInclusive, name: String, obj: U) -> Self {
-        Self { range, name, obj }
+    pub fn new(range: PageRangeInclusive, name: String, obj: U, contains_guard_page: bool) -> Self {
+        Self {
+            range,
+            name,
+            obj,
+            contains_guard_page,
+        }
     }
 
-    pub fn base(&self) -> VirtualAddress {
-        self.range.start_page.address()
+    pub fn start(&self) -> VirtualAddress {
+        if self.contains_guard_page {
+            (self.range.start_page + 1u64).start_address()
+        } else {
+            self.range.start_page.start_address()
+        }
+    }
+
+    pub fn end(&self) -> VirtualAddress {
+        self.range.end_page.end_address()
     }
 
     pub fn size(&self) -> usize {
-        self.range.size()
+        if self.contains_guard_page {
+            self.range.size() - self.range.start_page().size()
+        } else {
+            self.range.size()
+        }
     }
 }

@@ -82,7 +82,7 @@ where
         let start_page = Page::containing_address(virtual_address);
         let end_page = Page::containing_address(virtual_address + value_bytes.len());
         let mut bytes_written = 0;
-        for page in Page::<Size4KiB>::range_inclusive(start_page, end_page) {
+        for page in Page::<Size4KiB>::range_inclusive(start_page, end_page).iter() {
             // entry.offset if relative to virtual base, so we need to first map
             // the page corresponding to virtual base to its physical frame and then
             // calculate the correct offset
@@ -230,7 +230,7 @@ where
             }
 
             // Map section into memory
-            for frame in PhysicalFrame::range_inclusive(start_frame, end_frame) {
+            for frame in PhysicalFrame::range_inclusive(start_frame, end_frame).iter() {
                 let frame_offset = frame - start_frame;
                 // 1:1 mapping
                 let page = start_page + frame_offset;
@@ -305,7 +305,7 @@ where
                     physical_start_address + header.file_size() - 1u64,
                 );
                 */
-                for page in Page::range_inclusive(start_page, end_page) {
+                for page in Page::range_inclusive(start_page, end_page).iter() {
                     let frame = self
                         .frame_allocator
                         .allocate_frame()

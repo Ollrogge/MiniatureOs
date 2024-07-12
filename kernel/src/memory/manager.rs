@@ -7,15 +7,15 @@ use super::{
     virtual_memory_object::{MemoryBackedVirtualMemoryObject, VirtualMemoryObject},
     MemoryError,
 };
-use crate::{allocator::init_heap, error::KernelError};
+use crate::{allocator::init_heap, error::KernelError, serial_println};
 use alloc::{string::String, vec::Vec};
 use api::BootInfo;
 use core::iter::zip;
 use util::mutex::{Mutex, MutexGuard};
 use x86_64::{
     memory::{
-        FrameAllocator, Page, PageAlignedSize, PageRangeInclusive, PhysicalAddress, PhysicalFrame,
-        VirtualAddress, VirtualRange,
+        FrameAllocator, Page, PageAlignedSize, PageRangeInclusive, PageSize, PhysicalAddress,
+        PhysicalFrame, Size4KiB, VirtualAddress, VirtualRange,
     },
     paging::{
         linked_list_frame_allocator::LinkedListFrameAllocator,
@@ -129,29 +129,47 @@ impl MemoryManager {
     */
 
     // todo: lazily allocate and only back with frame on page fault
-    pub fn allocate_kernel_region_with_size<U>(
+    pub fn allocate_kernel_region_with_size(
         &mut self,
         size: PageAlignedSize,
         name: String,
         typ: RegionType,
         access_flags: PageTableEntryFlags,
         strategy: AllocationStrategy,
-    ) -> Result<VirtualMemoryRegion<MemoryBackedVirtualMemoryObject>, KernelError>
-    where
-        U: VirtualMemoryObject,
-    {
-        let obj = MemoryBackedVirtualMemoryObject::create(size, strategy)?;
+    ) -> Result<VirtualMemoryRegion<MemoryBackedVirtualMemoryObject>, KernelError> {
+        let obj = MemoryBackedVirtualMemoryObject::create(self, size, strategy)?;
 
-        let range = self.region_tree.try_allocate_size_in_region(
+        // all kernel stacks have a guard page
+        let region_size = match typ {
+            RegionType::Stack => size + Size4KiB::SIZE,
+            _ => size,
+        };
+
+        let page_range: PageRangeInclusive = self.region_tree.try_allocate_size_in_region(
             name.clone(),
             typ,
-            obj.size(),
+            region_size,
             region::PlacingStrategy::Anywhere,
         )?;
 
-        assert_eq!(range.len(), obj.frames().len());
+        // all kernel stacks have a guard page
+        if typ == RegionType::Stack {
+            self.kernel_page_table
+                .as_mut()
+                .unwrap()
+                .map_to(
+                    PhysicalFrame::containing_address(PhysicalAddress::new(0)),
+                    page_range.start_page,
+                    PageTableEntryFlags::NONE,
+                    &mut self.frame_allocator,
+                )?
+                .ignore();
+        }
 
-        for (frame, page) in zip(obj.frames(), range) {
+        assert_eq!(page_range.len() - 1, obj.frames().len());
+
+        // skip guard page
+        for (frame, page) in zip(obj.frames(), page_range.iter().skip(1)) {
             self.kernel_page_table
                 .as_mut()
                 .unwrap()
@@ -159,7 +177,11 @@ impl MemoryManager {
                 .flush();
         }
 
-        Ok(VirtualMemoryRegion::new(range, name, obj))
+        if typ == RegionType::Stack {
+            Ok(VirtualMemoryRegion::new(page_range, name, obj, true))
+        } else {
+            Ok(VirtualMemoryRegion::new(page_range, name, obj, false))
+        }
     }
 
     pub fn frame_allocator(&mut self) -> &mut LinkedListFrameAllocator {
@@ -175,12 +197,6 @@ impl MemoryManager {
             })
             .collect()
     }
-
-    /*
-    pub fn the() -> MutexGuard<'static, MemoryManager> {
-        MEMORY_MANAGER.lock()
-    }
-    */
 
     pub fn the() -> &'static Mutex<MemoryManager> {
         &MEMORY_MANAGER
