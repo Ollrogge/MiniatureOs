@@ -6,20 +6,18 @@ use alloc::string::String;
 use api::{BootInfo, PhysicalMemoryRegions};
 use core::{alloc::Layout, arch::asm, mem::size_of, panic::PanicInfo};
 use kernel::{
-    allocator::{
-        buddy_allocator::{BuddyAllocator, Chunk},
-        init_heap,
-        stack_allocator::Stack,
-        Locked, ALLOCATOR, HEAP_SIZE, HEAP_START,
+    allocator::ALLOCATOR,
+    housekeeping_threads::{spawn_finalizer_thread, spawn_idle_thread},
+    kernel_init,
+    multitasking::{
+        process,
+        thread::{leave_thread, ThreadPriority},
     },
-    interrupts, kernel_init,
-    multitasking::process,
     print, println, serial_println,
 };
 use x86_64::{
     instructions::{hlt, int3},
-    memory::{MemoryRegion, PhysicalMemoryRegion},
-    register::Cr0,
+    memory::MemoryRegion,
 };
 
 extern crate alloc;
@@ -52,12 +50,14 @@ fn trigger_int3() {
     int3();
 }
 
+#[allow(dead_code)]
 fn trigger_invalid_opcode() {
     unsafe {
         asm!("ud2");
     }
 }
 
+#[allow(dead_code)]
 fn trigger_divide_by_zero() {
     unsafe {
         asm!("mov rax, {0:r}", "mov rcx, {1:r}", "div rcx", in(reg) 4, in(reg) 0);
@@ -67,17 +67,20 @@ fn trigger_divide_by_zero() {
 // should cause a pagefault because guard page is hit
 // to trigger double fault: unregister page fault handler. Then a page fault
 // will be raised which triggers a double fault since the descriptor is invalid
+#[allow(dead_code)]
 fn stack_overflow() {
     stack_overflow()
 }
 
 // using *mut u64 here causes an infinite loop since address is not 8 byte aligned
 // todo: this is weird ?, can cause infinite loops at other places ?
+#[allow(dead_code)]
 fn trigger_page_fault() {
     unsafe { *(0xdeabeef as *mut u8) = 42 };
 }
 
 // TODO: put this into the test_kernel
+#[allow(dead_code)]
 unsafe fn test_buddy_allocator() {
     let mut allocator = ALLOCATOR.lock();
     let layout_x100 = Layout::from_size_align(0x100, size_of::<usize>()).unwrap();
@@ -133,6 +136,7 @@ unsafe fn test_buddy_allocator() {
     allocator.dealloc(c4);
 }
 
+#[allow(dead_code)]
 fn test_heap_allocations() {
     {
         let heap_value_1 = Box::new(41);
@@ -180,23 +184,12 @@ fn start(info: &'static BootInfo) -> ! {
     process::init(info).unwrap();
     println!("Processes initialized, spawning idle thread");
 
-    process::spawn_kernel_thread(String::from("idle_thread"), idle_thread_func).unwrap();
+    spawn_idle_thread().unwrap();
+    spawn_finalizer_thread().unwrap();
 
-    loop {
-        hlt();
-        println!("Colonel thread");
-    }
+    // done initializing, kill colonel thread
+    leave_thread();
 
-    hlt_loop();
     //trigger_page_fault();
     //stack_overflow();
-}
-
-pub extern "C" fn idle_thread_func() -> ! {
-    loop {
-        println!("Idle thread");
-        hlt();
-    }
-
-    loop {}
 }

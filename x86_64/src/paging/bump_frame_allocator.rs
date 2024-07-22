@@ -1,9 +1,5 @@
-use crate::{
-    memory::{
-        Address, FrameAllocator, MemoryRegion, PageSize, PhysicalAddress, PhysicalFrame,
-        PhysicalMemoryRegion, Size4KiB,
-    },
-    serial_println,
+use crate::memory::{
+    Address, FrameAllocator, MemoryRegion, PageSize, PhysicalAddress, PhysicalFrame, Size4KiB,
 };
 use core::{
     clone::Clone,

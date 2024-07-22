@@ -1,7 +1,12 @@
-use super::manager::AllocationStrategy;
-use crate::memory::{manager::MemoryManager, MemoryError};
+use super::{address_space, manager::AllocationStrategy};
+use crate::{
+    memory::{manager::MemoryManager, MemoryError},
+    multitasking::process::Process,
+    serial_println,
+};
 use alloc::vec::Vec;
-use x86_64::memory::{PageAlignedSize, PageSize, PhysicalFrame, Size4KiB};
+use core::ops::Drop;
+use x86_64::memory::{PageAlignedSize, PageRangeInclusive, PageSize, PhysicalFrame, Size4KiB};
 pub trait VirtualMemoryObject {
     fn size(&self) -> PageAlignedSize;
 }
@@ -17,13 +22,10 @@ impl MemoryBackedVirtualMemoryObject {
         Self { frames }
     }
     // ignore strategy for now. we always allocate frame immediately
-    pub fn create(
-        memory_manager: &mut MemoryManager,
-        size: PageAlignedSize,
+    pub fn create_with_frames(
+        frames: Vec<PhysicalFrame>,
         _: AllocationStrategy,
     ) -> Result<MemoryBackedVirtualMemoryObject, MemoryError> {
-        let frames = memory_manager.try_allocate_frames(size.in_pages())?;
-
         Ok(Self { frames })
     }
 
@@ -35,5 +37,12 @@ impl MemoryBackedVirtualMemoryObject {
 impl VirtualMemoryObject for MemoryBackedVirtualMemoryObject {
     fn size(&self) -> PageAlignedSize {
         PageAlignedSize::new(self.frames.len() * Size4KiB::SIZE)
+    }
+}
+
+impl Drop for MemoryBackedVirtualMemoryObject {
+    fn drop(&mut self) {
+        serial_println!("Drop MemoryBackedVirtualMemoryObject");
+        MemoryManager::the().lock().deallocate_frames(&self.frames);
     }
 }

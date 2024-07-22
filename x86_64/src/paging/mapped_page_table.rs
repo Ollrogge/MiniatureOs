@@ -1,13 +1,10 @@
 use crate::{
-    memory::{
-        Address, FrameAllocator, Page, PageSize, PhysicalFrame, Size2MiB, Size4KiB, VirtualAddress,
-    },
+    memory::{FrameAllocator, Page, PageSize, PhysicalFrame, Size2MiB, Size4KiB, VirtualAddress},
     paging::{
         Mapper, MappingError, PageTable, PageTableEntry, PageTableEntryFlags, TlbFlusher,
         TranslationError, Translator, UnmappingError,
     },
 };
-use core::ops::Add;
 /// Provides a virtual address mapping for physical page table frames.
 ///
 /// This only works if the physical address space is somehow mapped to the virtual

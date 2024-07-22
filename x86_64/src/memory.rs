@@ -3,6 +3,7 @@ use core::{
     fmt::{self, Display, Formatter, LowerHex, Result},
     marker::PhantomData,
     ops::{Add, AddAssign, Range, Rem, Sub},
+    ptr::addr_of_mut,
 };
 
 pub const KIB: u64 = 1024;
@@ -214,6 +215,10 @@ impl PageAlignedSize {
 
     pub fn in_pages(&self) -> usize {
         self.0 / Size4KiB::SIZE
+    }
+
+    pub fn in_frames(&self) -> usize {
+        self.in_pages()
     }
 }
 
@@ -671,7 +676,7 @@ impl<S: PageSize> AddAssign<u64> for PhysicalFrame<S> {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct Page<S: PageSize = Size4KiB> {
     pub address: VirtualAddress,
     pub size: PhantomData<S>,
@@ -724,7 +729,7 @@ impl<S: PageSize> Page<S> {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct PageRangeInclusive<S: PageSize = Size4KiB> {
     pub start_page: Page<S>,
     pub end_page: Page<S>,

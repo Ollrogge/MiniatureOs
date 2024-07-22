@@ -25,6 +25,7 @@ use x86_64::{
     register::Cr3,
 };
 
+#[derive(PartialEq)]
 pub enum AllocationStrategy {
     AllocateNow,
 }
@@ -137,11 +138,14 @@ impl MemoryManager {
         access_flags: PageTableEntryFlags,
         strategy: AllocationStrategy,
     ) -> Result<VirtualMemoryRegion<MemoryBackedVirtualMemoryObject>, KernelError> {
-        let obj = MemoryBackedVirtualMemoryObject::create(self, size, strategy)?;
+        let frames = self.try_allocate_frames(size.in_frames())?;
+        let obj = MemoryBackedVirtualMemoryObject::create_with_frames(frames, strategy)?;
+
+        let has_guard_page = typ == RegionType::Stack;
 
         // all kernel stacks have a guard page
-        let region_size = match typ {
-            RegionType::Stack => size + Size4KiB::SIZE,
+        let region_size = match has_guard_page {
+            true => size + Size4KiB::SIZE,
             _ => size,
         };
 
@@ -153,7 +157,7 @@ impl MemoryManager {
         )?;
 
         // all kernel stacks have a guard page
-        if typ == RegionType::Stack {
+        if has_guard_page {
             self.kernel_page_table
                 .as_mut()
                 .unwrap()
@@ -177,15 +181,13 @@ impl MemoryManager {
                 .flush();
         }
 
-        if typ == RegionType::Stack {
-            Ok(VirtualMemoryRegion::new(page_range, name, obj, true))
-        } else {
-            Ok(VirtualMemoryRegion::new(page_range, name, obj, false))
-        }
+        Ok(VirtualMemoryRegion::new(page_range, name, obj, typ))
     }
 
-    pub fn frame_allocator(&mut self) -> &mut LinkedListFrameAllocator {
-        &mut self.frame_allocator
+    pub fn deallocate_frames(&mut self, frames: &Vec<PhysicalFrame>) {
+        for frame in frames {
+            self.frame_allocator.deallocate_frame(*frame);
+        }
     }
 
     pub fn try_allocate_frames(&mut self, amt: usize) -> Result<Vec<PhysicalFrame>, MemoryError> {
@@ -198,7 +200,28 @@ impl MemoryManager {
             .collect()
     }
 
+    pub fn frame_allocator(&mut self) -> &mut LinkedListFrameAllocator {
+        &mut self.frame_allocator
+    }
+
     pub fn the() -> &'static Mutex<MemoryManager> {
         &MEMORY_MANAGER
+    }
+}
+
+pub struct FrameAllocatorDelegate;
+unsafe impl FrameAllocator<Size4KiB> for FrameAllocatorDelegate {
+    fn allocate_frame(&mut self) -> Option<PhysicalFrame<Size4KiB>> {
+        MemoryManager::the()
+            .lock()
+            .frame_allocator()
+            .allocate_frame()
+    }
+
+    fn deallocate_frame(&mut self, frame: PhysicalFrame<Size4KiB>) {
+        MemoryManager::the()
+            .lock()
+            .frame_allocator()
+            .deallocate_frame(frame)
     }
 }

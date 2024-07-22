@@ -3,6 +3,7 @@ use bitflags::bitflags;
 use core::{
     arch::asm,
     fmt::{self, Debug},
+    ptr::addr_of,
 };
 use lazy_static::lazy_static;
 use util::mutex::Mutex;
@@ -107,7 +108,7 @@ lazy_static! {
             const STACK_SIZE: usize = Size4KiB::SIZE as usize * 5;
             static mut STACK: [u8; STACK_SIZE] = [0; STACK_SIZE];
 
-            let stack_start = VirtualAddress::from_ptr(unsafe { &STACK });
+            let stack_start = VirtualAddress::from_raw_ptr(unsafe { addr_of!(STACK) });
             let stack_end = stack_start + STACK_SIZE;
 
             stack_end
@@ -249,10 +250,12 @@ extern "C" fn timer_interrupt_handler(_frame: &ExceptionStackFrame) {
 }
 
 extern "C" fn keyboard_interrupt_handler(_frame: &ExceptionStackFrame) {
-    let mut port = Port::new(0x60);
+    /*
+    let port = Port::new(0x60);
     let scancode: u8 = unsafe { port.read() };
 
     print!("k");
+    */
 
     PICS.lock()
         .notify_end_of_interrupt(InterruptIndex::Keyboard.as_remapped_idt_number());

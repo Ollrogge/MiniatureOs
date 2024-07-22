@@ -1,6 +1,7 @@
-use super::process::Process;
+use super::{process::Process, scheduler::Scheduler};
 use crate::{
     allocator::stack_allocator::Stack,
+    error::KernelError,
     memory::{
         address_space::AddressSpace,
         region::VirtualMemoryRegion,
@@ -48,6 +49,14 @@ pub enum ThreadRunState {
     Finished,
 }
 
+pub enum ThreadPriority {
+    Idle,
+    Low,
+    Normal,
+    High,
+    Max,
+}
+
 pub struct Thread {
     name: String,
     pub process: Arc<Mutex<Process>>,
@@ -58,10 +67,11 @@ pub struct Thread {
     // useful since we change this address in assembly code
     last_stack_ptr: Pin<Box<u64>>,
     state: ThreadRunState,
+    priority: ThreadPriority,
 }
 
-extern "C" fn leave_thread() -> ! {
-    loop {}
+pub extern "C" fn leave_thread() -> ! {
+    unsafe { Scheduler::the().finish_current_thread() };
 }
 
 impl Thread {
@@ -70,6 +80,7 @@ impl Thread {
         process: Arc<Mutex<Process>>,
         stack: VirtualMemoryRegion<MemoryBackedVirtualMemoryObject>,
         entry_point: ThreadEntryFunc,
+        priority: ThreadPriority,
     ) -> Self {
         let mut thread = Self {
             name,
@@ -78,6 +89,7 @@ impl Thread {
             // will be set when stack of thread is setup
             last_stack_ptr: Box::pin(0),
             state: ThreadRunState::Ready,
+            priority,
         };
 
         unsafe { thread.setup_stack(entry_point) };
@@ -96,6 +108,7 @@ impl Thread {
             stack,
             last_stack_ptr: Box::pin(0),
             state: ThreadRunState::Ready,
+            priority: ThreadPriority::Normal,
         }
     }
 
@@ -133,8 +146,8 @@ impl Thread {
         self.state = state;
     }
 
-    pub fn address_space(&self) -> AddressSpace {
-        self.process.as_ref().lock().address_space()
+    pub fn cr3(&self) -> u64 {
+        self.process.as_ref().lock().address_space().cr3()
     }
 
     pub fn last_stack_ptr_mut(&mut self) -> &mut u64 {
@@ -147,6 +160,10 @@ impl Thread {
 
     pub fn name(&self) -> &String {
         &self.name
+    }
+
+    pub fn finalize(&mut self) -> Result<(), KernelError> {
+        Ok(())
     }
 }
 

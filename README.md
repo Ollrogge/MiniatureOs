@@ -11,7 +11,7 @@ Miniature hobby bootloader & POSIX-compatible kernel to teach me the basic conce
 ### Features
 - [X] BIOS bootloader
 - [X] Heap allocator
-    - Bump frame allocator
+    - Bump / Linkedlist frame allocator
     - Buddy heap allocator
 
 ### Goals

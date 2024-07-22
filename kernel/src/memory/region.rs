@@ -1,9 +1,21 @@
-use super::{virtual_memory_object::VirtualMemoryObject, MemoryError};
+use super::{
+    manager::MemoryManager,
+    virtual_memory_object::{MemoryBackedVirtualMemoryObject, VirtualMemoryObject},
+    MemoryError,
+};
+use crate::{
+    error::KernelError, memory::manager::FrameAllocatorDelegate, multitasking::process::Process,
+    serial_println,
+};
 use alloc::{collections::BTreeMap, string::String, vec::Vec};
+use core::ops::Drop;
 use util::range_allocator::{self, RangeAllocator};
-use x86_64::memory::{
-    Address, Page, PageAlignedSize, PageRangeInclusive, Region, Size4KiB, VirtualAddress,
-    VirtualRange,
+use x86_64::{
+    memory::{
+        Address, Page, PageAlignedSize, PageRangeInclusive, PhysicalAddress, PhysicalFrame, Region,
+        Size4KiB, VirtualAddress,
+    },
+    paging::PageTableEntryFlags,
 };
 
 pub enum AccessType {
@@ -11,7 +23,7 @@ pub enum AccessType {
     ReadWrite,
 }
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, Clone, Copy, Debug)]
 pub enum RegionType {
     Stack,
     Heap,
@@ -111,13 +123,13 @@ impl RegionTree {
 
     pub fn try_deallocate_from_region(
         &mut self,
-        name: String,
         typ: RegionType,
-    ) -> Result<(), MemoryError> {
+        name: &String,
+    ) -> Result<PageRangeInclusive, MemoryError> {
         if let Some(region_info) = self.regions.iter_mut().find(|r| r.typ == typ) {
-            if let Some(range) = region_info.subregions.remove(&name) {
+            if let Some(range) = region_info.subregions.remove(name) {
                 region_info.allocator.deallocate_range(range.into());
-                return Ok(());
+                return Ok(range);
             }
         }
         Err(MemoryError::InvalidRegion)
@@ -130,21 +142,21 @@ pub struct VirtualMemoryRegion<U: VirtualMemoryObject> {
     range: PageRangeInclusive,
     name: String,
     obj: U,
-    contains_guard_page: bool,
+    typ: RegionType,
 }
 
 impl<U: VirtualMemoryObject> VirtualMemoryRegion<U> {
-    pub fn new(range: PageRangeInclusive, name: String, obj: U, contains_guard_page: bool) -> Self {
+    pub fn new(range: PageRangeInclusive, name: String, obj: U, typ: RegionType) -> Self {
         Self {
             range,
             name,
             obj,
-            contains_guard_page,
+            typ,
         }
     }
 
     pub fn start(&self) -> VirtualAddress {
-        if self.contains_guard_page {
+        if self.typ == RegionType::Stack {
             (self.range.start_page + 1u64).start_address()
         } else {
             self.range.start_page.start_address()
@@ -156,10 +168,36 @@ impl<U: VirtualMemoryObject> VirtualMemoryRegion<U> {
     }
 
     pub fn size(&self) -> usize {
-        if self.contains_guard_page {
+        if self.typ == RegionType::Stack {
             self.range.size() - self.range.start_page().size()
         } else {
             self.range.size()
+        }
+    }
+
+    pub fn typ(&self) -> RegionType {
+        self.typ
+    }
+}
+
+impl<U: VirtualMemoryObject> Drop for VirtualMemoryRegion<U> {
+    fn drop(&mut self) {
+        serial_println!("Drop VirtualMemoryRegion: {:?} {:?}", self.typ, self.name);
+        MemoryManager::the()
+            .lock()
+            .region_tree()
+            .try_deallocate_from_region(self.typ, &self.name)
+            .unwrap();
+
+        let process = Process::current();
+        let mut process_guard = process.lock();
+        let address_space = process_guard.address_space();
+
+        for page in self.range.iter() {
+            // not all pages might be mapped so ignore errors
+            if let Ok((_, flusher)) = address_space.unmap(page) {
+                flusher.flush();
+            }
         }
     }
 }

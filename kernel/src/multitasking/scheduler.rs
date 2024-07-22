@@ -2,27 +2,33 @@ use super::{
     process::Process,
     thread::{Thread, ThreadRunState},
 };
-use crate::{
-    allocator::stack_allocator::Stack, memory::virtual_memory_object::VirtualMemoryObject, println,
-    serial_println,
-};
 use alloc::{boxed::Box, collections::VecDeque, string::String, sync::Arc, vec::Vec};
-use core::{arch::asm, pin::Pin};
-use lazy_static::lazy_static;
-use util::mutex::Mutex;
-use x86_64::memory::{Address, PhysicalAddress, VirtualAddress};
+use core::{
+    arch::asm,
+    cell::UnsafeCell,
+    pin::Pin,
+    ptr::addr_of_mut,
+    sync::atomic::{AtomicBool, Ordering},
+};
+use util::mutex::{Mutex, MutexGuard};
+use x86_64::instructions::hlt;
 
 // Scheduler cant be protected by a mutex since it will not be dropped on task switch
+// which leads to a deadlock
 static mut SCHEDULER: Scheduler = {
     Scheduler {
         ready_threads: VecDeque::new(),
+        dying_threads: Mutex::new(VecDeque::new()),
         running_thread: None,
+        running_thread_is_finished: AtomicBool::new(false),
     }
 };
 
 pub struct Scheduler {
     ready_threads: VecDeque<Thread>,
+    dying_threads: Mutex<VecDeque<Thread>>,
     running_thread: Option<Thread>,
+    running_thread_is_finished: AtomicBool,
 }
 
 pub fn schedule() {
@@ -32,6 +38,20 @@ pub fn schedule() {
 impl Scheduler {
     pub fn add_thread(&mut self, thread: Thread) {
         self.ready_threads.push_back(thread);
+    }
+
+    pub fn finish_current_thread(&mut self) -> ! {
+        self.running_thread_is_finished
+            .store(true, Ordering::Relaxed);
+
+        // Trigger scheduling
+        loop {
+            hlt();
+        }
+    }
+
+    pub fn dying_threads(&mut self) -> MutexGuard<VecDeque<Thread>> {
+        self.dying_threads.lock()
     }
 
     pub fn init(mut thread: Thread) {
@@ -45,15 +65,15 @@ impl Scheduler {
     }
 
     pub(crate) unsafe fn the() -> &'static mut Scheduler {
-        &mut SCHEDULER
+        &mut *addr_of_mut!(SCHEDULER)
     }
 
     pub fn schedule(&mut self) {
         if let Some(new_thread) = self.ready_threads.pop_front() {
             let mut old_thread = self.running_thread.take().unwrap();
 
-            let old_cr3 = old_thread.address_space().cr3;
-            let new_cr3 = new_thread.address_space().cr3;
+            let old_cr3 = old_thread.cr3();
+            let new_cr3 = new_thread.cr3();
 
             let new_rsp = new_thread.last_stack_ptr();
             let old_rsp = old_thread.last_stack_ptr_mut() as *mut u64;
@@ -68,15 +88,22 @@ impl Scheduler {
             );
             */
 
-            self.ready_threads.push_back(old_thread);
+            if self.running_thread_is_finished.load(Ordering::SeqCst) {
+                self.dying_threads.lock().push_back(old_thread);
+                self.running_thread_is_finished
+                    .store(false, Ordering::Relaxed);
+            } else {
+                self.ready_threads.push_back(old_thread);
+            }
+
             self.running_thread = Some(new_thread);
 
             unsafe { task_switch(old_rsp, new_rsp, old_cr3, new_cr3) };
         }
     }
 
-    pub fn current_process(&self) -> Arc<Mutex<Process>> {
-        self.running_thread.as_ref().unwrap().process.clone()
+    pub fn current_thread(&self) -> &Thread {
+        &self.running_thread.as_ref().unwrap()
     }
 }
 

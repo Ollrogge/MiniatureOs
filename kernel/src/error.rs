@@ -1,6 +1,6 @@
 use crate::memory::MemoryError;
 use core::{fmt, iter::Map};
-use x86_64::paging::{MappingError, TranslationError};
+use x86_64::paging::{MappingError, TranslationError, UnmappingError};
 
 #[derive(Debug)]
 pub enum KernelError {
@@ -8,6 +8,7 @@ pub enum KernelError {
     // TODO: merge the two below
     MappingError(MappingError),
     TranslationError(TranslationError),
+    UnmappingError(UnmappingError),
 }
 
 impl fmt::Display for KernelError {
@@ -16,6 +17,7 @@ impl fmt::Display for KernelError {
             KernelError::MemoryError(e) => write!(f, "Allocation error: {:?}", e),
             KernelError::MappingError(e) => write!(f, "Paging mapping error: {:?}", e),
             KernelError::TranslationError(e) => write!(f, "Paging translation error: {:?}", e),
+            KernelError::UnmappingError(e) => write!(f, "Unmapping error: {:?}", e),
         }
     }
 }
@@ -31,6 +33,12 @@ impl From<MemoryError> for KernelError {
 impl From<MappingError> for KernelError {
     fn from(error: MappingError) -> Self {
         KernelError::MappingError(error)
+    }
+}
+
+impl From<UnmappingError> for KernelError {
+    fn from(error: UnmappingError) -> Self {
+        KernelError::UnmappingError(error)
     }
 }
 

@@ -1,32 +1,25 @@
 use super::{
     scheduler::Scheduler,
-    thread::{Thread, ThreadEntryFunc},
+    thread::{Thread, ThreadEntryFunc, ThreadPriority},
 };
 use crate::{
-    allocator::stack_allocator::{Stack, StackAllocator},
     error::KernelError,
     memory::{
-        address_space::{self, AddressSpace},
+        address_space::AddressSpace,
         manager::{AllocationStrategy, MemoryManager},
         region::{RegionType, VirtualMemoryRegion},
         virtual_memory_object::MemoryBackedVirtualMemoryObject,
     },
-    serial_println,
+    serial_println, GlobalData,
 };
-use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
+use alloc::{collections::BTreeMap, format, string::String, sync::Arc, vec::Vec};
 use api::BootInfo;
-use core::{
-    arch::asm,
-    sync::atomic::{AtomicU64, Ordering::Relaxed},
-};
+use core::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use util::mutex::{Mutex, MutexGuard};
 use x86_64::{
-    memory::{
-        Page, PageAlignedSize, PageRangeInclusive, PhysicalAddress, PhysicalFrame, Size4KiB,
-        VirtualAddress, KIB,
-    },
+    memory::{PageAlignedSize, KIB},
     paging::{PageTableEntryFlags, Translator},
-    register::{Cr3, Cr3Flags},
+    register::Cr3,
 };
 /**
  *  https://www.youtube.com/watch?v=3xgOybGlYes&t=1090s
@@ -133,7 +126,7 @@ impl Process {
         Self {
             id: ProcessId::new(),
             name,
-            address_space: AddressSpace::new(cr3),
+            address_space: AddressSpace::new(cr3, GlobalData::the().physical_memory_offset()),
         }
     }
 
@@ -141,8 +134,13 @@ impl Process {
         self.id
     }
 
-    pub fn address_space(&self) -> AddressSpace {
-        self.address_space
+    pub fn current() -> Arc<Mutex<Process>> {
+        unsafe { Scheduler::the().current_thread().process.clone() }
+    }
+
+    // TODO: rwlock
+    pub fn address_space(&mut self) -> &mut AddressSpace {
+        &mut self.address_space
     }
 }
 
@@ -151,6 +149,10 @@ pub fn init(boot_info: &'static BootInfo) -> Result<(), KernelError> {
         String::from("colonel"),
         Cr3::read_raw(),
     )));
+
+    PROCESS_TREE
+        .lock()
+        .add_process(process.lock().id(), process.clone());
 
     let mut memory_manager = MemoryManager::the().lock();
 
@@ -164,20 +166,23 @@ pub fn init(boot_info: &'static BootInfo) -> Result<(), KernelError> {
 
     let obj = MemoryBackedVirtualMemoryObject::new(kernel_stack_boot_frames);
 
+    let thread_name = String::from("colonel_thread");
+    let stack_name = format!("{}_stack", thread_name);
+
     memory_manager.region_tree().try_allocate_range_in_region(
-        String::from("kernel_stack_boot"),
+        stack_name.clone(),
         RegionType::Stack,
         boot_info.kernel_stack.clone(),
     )?;
 
     let stack = VirtualMemoryRegion::new(
         boot_info.kernel_stack.clone(),
-        String::from("kernel_stack_boot"),
+        stack_name,
         obj,
-        true,
+        RegionType::Stack,
     );
 
-    let thread = Thread::colonel_thread(String::from("colonel_thread"), process, stack);
+    let thread = Thread::colonel_thread(thread_name, process, stack);
 
     Scheduler::init(thread);
 
@@ -200,10 +205,14 @@ fn try_create_stack_thread(
         )
 }
 
-pub fn spawn_kernel_thread(name: String, func: ThreadEntryFunc) -> Result<(), KernelError> {
-    let cur_process = unsafe { Scheduler::the().current_process() };
-    let thread_stack = try_create_stack_thread(name.clone())?;
-    let thread = Thread::new(name, cur_process, thread_stack, func);
+pub fn spawn_kernel_thread(
+    name: String,
+    func: ThreadEntryFunc,
+    priority: ThreadPriority,
+) -> Result<(), KernelError> {
+    let cur_process = Process::current();
+    let thread_stack = try_create_stack_thread(format!("{}_stack", name.clone()))?;
+    let thread = Thread::new(name, cur_process, thread_stack, func, priority);
 
     unsafe { Scheduler::the().add_thread(thread) };
 
