@@ -8,7 +8,7 @@ use crate::{
     serial_println,
 };
 use alloc::{collections::BTreeMap, string::String, vec::Vec};
-use core::ops::Drop;
+use core::{borrow::Borrow, ops::Drop};
 use util::range_allocator::{self, RangeAllocator};
 use x86_64::{
     memory::{
@@ -67,12 +67,15 @@ impl RegionTree {
         self.regions.push(info);
     }
 
-    pub fn try_allocate_range_in_region(
+    pub fn try_allocate_range_in_region<N>(
         &mut self,
-        name: String,
+        name: N,
         typ: RegionType,
         range: PageRangeInclusive,
-    ) -> Result<(), MemoryError> {
+    ) -> Result<(), MemoryError>
+    where
+        N: Into<String>,
+    {
         if let Some(region_info) = self.regions.iter_mut().find(|r| r.typ == typ) {
             let res = region_info
                 .allocator
@@ -80,7 +83,7 @@ impl RegionTree {
             if !res {
                 Err(MemoryError::InvalidRange)
             } else {
-                region_info.subregions.insert(name, range);
+                region_info.subregions.insert(name.into(), range);
                 Ok(())
             }
         } else {
@@ -88,13 +91,16 @@ impl RegionTree {
         }
     }
 
-    pub fn try_allocate_size_in_region(
+    pub fn try_allocate_size_in_region<N>(
         &mut self,
-        name: String,
+        name: N,
         typ: RegionType,
         size: PageAlignedSize,
         _: PlacingStrategy,
-    ) -> Result<PageRangeInclusive, MemoryError> {
+    ) -> Result<PageRangeInclusive, MemoryError>
+    where
+        N: Into<String>,
+    {
         if size.in_bytes() == 0 {
             return Err(MemoryError::InvalidSize);
         }
@@ -112,7 +118,7 @@ impl RegionTree {
                 .ok_or(MemoryError::OutOfVirtualMemory);
 
             if let Ok(range) = &res {
-                region_info.subregions.insert(name, range.clone());
+                region_info.subregions.insert(name.into(), range.clone());
             }
 
             res
@@ -121,13 +127,16 @@ impl RegionTree {
         }
     }
 
-    pub fn try_deallocate_from_region(
+    pub fn try_deallocate_from_region<N>(
         &mut self,
         typ: RegionType,
-        name: &String,
-    ) -> Result<PageRangeInclusive, MemoryError> {
+        name: N,
+    ) -> Result<PageRangeInclusive, MemoryError>
+    where
+        N: Borrow<String>,
+    {
         if let Some(region_info) = self.regions.iter_mut().find(|r| r.typ == typ) {
-            if let Some(range) = region_info.subregions.remove(name) {
+            if let Some(range) = region_info.subregions.remove(name.borrow()) {
                 region_info.allocator.deallocate_range(range.into());
                 return Ok(range);
             }
@@ -146,10 +155,13 @@ pub struct VirtualMemoryRegion<U: VirtualMemoryObject> {
 }
 
 impl<U: VirtualMemoryObject> VirtualMemoryRegion<U> {
-    pub fn new(range: PageRangeInclusive, name: String, obj: U, typ: RegionType) -> Self {
+    pub fn new<N>(range: PageRangeInclusive, name: N, obj: U, typ: RegionType) -> Self
+    where
+        N: Into<String>,
+    {
         Self {
             range,
-            name,
+            name: name.into(),
             obj,
             typ,
         }

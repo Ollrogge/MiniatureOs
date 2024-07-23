@@ -32,6 +32,11 @@
     + https://wiki.osdev.org/APIC_Timer
 
 ## Next steps
++ do the executor tutorial of the blog os series
++ implement todo datastructures, clean up code
++ move heap testing etc into the integration test kernels
++ implement sleep
+ + implement support for APIC
 + ramdisk
 + virtual filesystem using ext2
 + elf loader user programs

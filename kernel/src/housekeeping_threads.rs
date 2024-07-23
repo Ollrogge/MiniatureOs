@@ -11,7 +11,7 @@ use alloc::{string::String, vec::Vec};
 use x86_64::instructions::hlt;
 
 pub fn spawn_idle_thread() -> Result<(), KernelError> {
-    process::spawn_kernel_thread(String::from("Idle"), idle_thread_func, ThreadPriority::Idle)
+    process::spawn_kernel_thread("Idle", idle_thread_func, ThreadPriority::Idle)
 }
 
 extern "C" fn idle_thread_func() -> ! {
@@ -22,11 +22,7 @@ extern "C" fn idle_thread_func() -> ! {
 }
 
 pub fn spawn_finalizer_thread() -> Result<(), KernelError> {
-    process::spawn_kernel_thread(
-        String::from("Finalizer"),
-        finializer_thread_func,
-        ThreadPriority::Low,
-    )
+    process::spawn_kernel_thread("Finalizer", finializer_thread_func, ThreadPriority::Low)
 }
 
 extern "C" fn finializer_thread_func() -> ! {

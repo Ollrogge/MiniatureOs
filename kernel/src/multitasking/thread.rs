@@ -75,15 +75,18 @@ pub extern "C" fn leave_thread() -> ! {
 }
 
 impl Thread {
-    pub fn new(
-        name: String,
+    pub fn new<N>(
+        name: N,
         process: Arc<Mutex<Process>>,
         stack: VirtualMemoryRegion<MemoryBackedVirtualMemoryObject>,
         entry_point: ThreadEntryFunc,
         priority: ThreadPriority,
-    ) -> Self {
+    ) -> Self
+    where
+        N: Into<String>,
+    {
         let mut thread = Self {
-            name,
+            name: name.into(),
             process,
             stack,
             // will be set when stack of thread is setup
@@ -97,13 +100,16 @@ impl Thread {
         thread
     }
 
-    pub fn colonel_thread(
-        name: String,
+    pub fn colonel_thread<N>(
+        name: N,
         process: Arc<Mutex<Process>>,
         stack: VirtualMemoryRegion<MemoryBackedVirtualMemoryObject>,
-    ) -> Self {
+    ) -> Self
+    where
+        N: Into<String>,
+    {
         Self {
-            name,
+            name: name.into(),
             process,
             stack,
             last_stack_ptr: Box::pin(0),

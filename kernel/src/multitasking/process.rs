@@ -122,10 +122,13 @@ pub struct Process {
 }
 
 impl Process {
-    pub fn new(name: String, cr3: u64) -> Self {
+    pub fn new<N>(name: N, cr3: u64) -> Self
+    where
+        N: Into<String>,
+    {
         Self {
             id: ProcessId::new(),
-            name,
+            name: name.into(),
             address_space: AddressSpace::new(cr3, GlobalData::the().physical_memory_offset()),
         }
     }
@@ -145,10 +148,7 @@ impl Process {
 }
 
 pub fn init(boot_info: &'static BootInfo) -> Result<(), KernelError> {
-    let process = Arc::new(Mutex::new(Process::new(
-        String::from("colonel"),
-        Cr3::read_raw(),
-    )));
+    let process = Arc::new(Mutex::new(Process::new("colonel", Cr3::read_raw())));
 
     PROCESS_TREE
         .lock()
@@ -166,11 +166,10 @@ pub fn init(boot_info: &'static BootInfo) -> Result<(), KernelError> {
 
     let obj = MemoryBackedVirtualMemoryObject::new(kernel_stack_boot_frames);
 
-    let thread_name = String::from("colonel_thread");
-    let stack_name = format!("{}_stack", thread_name);
+    let stack_name = "colonel_stack";
 
     memory_manager.region_tree().try_allocate_range_in_region(
-        stack_name.clone(),
+        stack_name,
         RegionType::Stack,
         boot_info.kernel_stack.clone(),
     )?;
@@ -182,7 +181,7 @@ pub fn init(boot_info: &'static BootInfo) -> Result<(), KernelError> {
         RegionType::Stack,
     );
 
-    let thread = Thread::colonel_thread(thread_name, process, stack);
+    let thread = Thread::colonel_thread("colonel_thread", process, stack);
 
     Scheduler::init(thread);
 
@@ -205,13 +204,17 @@ fn try_create_stack_thread(
         )
 }
 
-pub fn spawn_kernel_thread(
-    name: String,
+pub fn spawn_kernel_thread<N>(
+    name: N,
     func: ThreadEntryFunc,
     priority: ThreadPriority,
-) -> Result<(), KernelError> {
+) -> Result<(), KernelError>
+where
+    N: Into<String>,
+{
+    let name = name.into();
     let cur_process = Process::current();
-    let thread_stack = try_create_stack_thread(format!("{}_stack", name.clone()))?;
+    let thread_stack = try_create_stack_thread(format!("{}_stack", &name))?;
     let thread = Thread::new(name, cur_process, thread_stack, func, priority);
 
     unsafe { Scheduler::the().add_thread(thread) };
