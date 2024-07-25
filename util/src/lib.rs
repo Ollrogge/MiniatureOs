@@ -1,4 +1,5 @@
 #![no_std]
+#[cfg(feature = "kernel")]
 pub mod hashmap;
 pub mod intrusive_linked_list;
 pub mod mutex;

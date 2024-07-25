@@ -2,6 +2,7 @@ use super::{
     process::Process,
     thread::{Thread, ThreadRunState},
 };
+use crate::serial_println;
 use alloc::{boxed::Box, collections::VecDeque, string::String, sync::Arc, vec::Vec};
 use core::{
     arch::asm,
@@ -26,6 +27,8 @@ static mut SCHEDULER: Scheduler = {
 
 pub struct Scheduler {
     ready_threads: VecDeque<Thread>,
+    // todo: this needs to be a rwlock or finializer thread + schedule could
+    // deadlock each other
     dying_threads: Mutex<VecDeque<Thread>>,
     running_thread: Option<Thread>,
     running_thread_is_finished: AtomicBool,
@@ -113,7 +116,7 @@ macro_rules! save_state {
     };
 }
 
-// skip rsp because we cant pop it since this would corrupt the stack layout
+// skip rsp because we cant pop it as this would corrupt the stack layout
 macro_rules! restore_state {
     () => {
         "pop r15; pop r14; pop r13; pop r12; pop r11; pop r10; pop r9; pop r8; pop rdi; pop rsi; pop rbp; add rsp, 8; pop rbx; pop rdx; pop rcx; pop rax; popfq"

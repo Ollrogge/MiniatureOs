@@ -93,6 +93,11 @@ impl ChainedPics {
         self.slave.write_data(0xff);
     }
 
+    pub fn enable(&self) {
+        self.master.write_data(0);
+        self.slave.write_data(0);
+    }
+
     // https://wiki.osdev.org/8259_PIC
     // default configuration of the PIC is not usable because it sends interrupt
     // vector numbers in the range of 0–15 to the CPU. These however are already

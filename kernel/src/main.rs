@@ -14,6 +14,7 @@ use kernel::{
         thread::{leave_thread, ThreadPriority},
     },
     print, println, serial_println,
+    time::Time,
 };
 use x86_64::{
     instructions::{hlt, int3},
@@ -186,6 +187,11 @@ fn start(info: &'static BootInfo) -> ! {
 
     spawn_idle_thread().unwrap();
     spawn_finalizer_thread().unwrap();
+
+    let start = Time::now();
+    serial_println!("Try time: 5 secs: {}", Time::elapsed_s(start));
+    while Time::elapsed_s(start) < 5 {}
+    serial_println!("5 secs done");
 
     // done initializing, kill colonel thread
     leave_thread();

@@ -90,6 +90,7 @@ lazy_static! {
                 .set_handler_function(handler_with_error_code!(double_fault_handler))
                 .set_interrupt_stack_index(DOUBLE_FAULT_IST_IDX as u16);
 
+            // PIT timer interrupt
             idt.interrupts[InterruptIndex::Timer.as_usize()]
                 .set_handler_function(handler_without_error_code!(timer_interrupt_handler));
 
@@ -242,6 +243,7 @@ extern "C" fn double_fault_handler(frame: &ExceptionStackFrame, _error_code: u64
     loop {}
 }
 
+// PIT timer interrupt handler
 extern "C" fn timer_interrupt_handler(_frame: &ExceptionStackFrame) {
     PICS.lock()
         .notify_end_of_interrupt(InterruptIndex::Timer.as_remapped_idt_number());

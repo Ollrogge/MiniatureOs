@@ -19,3 +19,9 @@ pub fn flush_tlb(address: VirtualAddress) {
 pub fn hlt() {
     unsafe { asm!("hlt", options(nostack, nomem, preserves_flags)) }
 }
+
+#[cfg(target_arch = "x86_64")]
+pub fn rdtsc() -> u64 {
+    use core::arch::x86_64::_rdtsc;
+    unsafe { _rdtsc() }
+}

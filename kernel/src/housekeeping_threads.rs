@@ -18,6 +18,7 @@ extern "C" fn idle_thread_func() -> ! {
     serial_println!("Idle thread enter");
     loop {
         hlt();
+        //serial_println!("Idle");
     }
 }
 
@@ -50,5 +51,6 @@ extern "C" fn finializer_thread_func() -> ! {
         }
 
         hlt();
+        //serial_println!("Finalizer");
     }
 }

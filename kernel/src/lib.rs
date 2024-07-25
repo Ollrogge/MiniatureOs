@@ -2,6 +2,7 @@
 #![no_main]
 #![feature(naked_functions)]
 #![feature(const_mut_refs)]
+#![feature(concat_idents)]
 use api::BootInfo;
 use error::KernelError;
 extern crate alloc;
@@ -26,6 +27,7 @@ pub mod multitasking;
 pub mod paging;
 pub mod qemu;
 pub mod serial;
+pub mod time;
 pub mod vga;
 
 static GLOBAL_DATA: Mutex<GlobalData> = Mutex::new(GlobalData::new());
@@ -59,6 +61,8 @@ use memory::manager::MemoryManager;
 pub fn kernel_init(boot_info: &'static BootInfo) -> Result<(), KernelError> {
     MemoryManager::the().lock().init(boot_info)?;
     interrupts::init();
+
+    time::init();
 
     GlobalData::the().init(boot_info.physical_memory_offset);
 
