@@ -70,6 +70,7 @@ impl Time {
         (TIME.rdtsc_start() / US_PER_MS) as u64
     }
 
+    // approach taken from brandon falks chocolate milk: https://github.com/gamozolabs/chocolate_milk/blob/master/kernel/src/time.rs#L61
     // determine frequency of rdtsc using PIT
     pub fn calibrate(&self) {
         let pit = Pit::new();

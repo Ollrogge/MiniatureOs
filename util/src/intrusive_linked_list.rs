@@ -4,95 +4,109 @@
 //!
 //! In usual linked lists the list contains a data pointer to the data
 //!
-use core::{mem::offset_of, ptr::NonNull};
+//! The current linked list implementation is basically small version of
+//! https://mycelium.elizas.website/cordyceps/list/index.html
+//!
+use core::{
+    cell::UnsafeCell,
+    marker::PhantomPinned,
+    mem,
+    ops::{Deref, DerefMut},
+    pin::Pin,
+    ptr,
+    ptr::NonNull,
+};
 
-/// Macro to obtain the container structure from a pointer to one of its members.
-macro_rules! container_of {
-    ($ptr:expr, $type:path, $member:ident) => {
-        $ptr.cast::<u8>()
-            .add(offset_of!($type, $member))
-            .cast::<$type>()
-    };
+pub struct BoxAt<T: ?Sized> {
+    ptr: *mut T,
 }
 
-/// Node of the intrusive linked list.
-pub struct ListNode {
-    next: Option<NonNull<ListNode>>,
-    prev: Option<NonNull<ListNode>>,
-}
-
-impl ListNode {
-    /// Creates a new ListNode.
-    pub fn new() -> Self {
-        Self {
-            next: None,
-            prev: None,
+impl<T> BoxAt<T> {
+    pub fn new(address: usize, value: T) -> Self {
+        let ptr = address as *mut T;
+        unsafe {
+            ptr::write(ptr, value);
         }
+
+        Self { ptr }
     }
 
-    /// Returns the next node, if any.
-    pub fn next(&self) -> Option<&ListNode> {
-        self.next.as_ref().map(|ptr| unsafe { ptr.as_ref() })
+    pub unsafe fn from_raw(ptr: *mut T) -> BoxAt<T> {
+        Self { ptr }
     }
 
-    /// Returns the next node as mutable, if any.
-    pub fn next_mut(&mut self) -> Option<&mut ListNode> {
-        self.next.as_mut().map(|mut ptr| unsafe { ptr.as_mut() })
+    pub fn leak(self) -> &'static mut T {
+        unsafe { &mut *self.ptr }
     }
 
-    /// Sets the next node.
-    pub fn set_next(&mut self, next: Option<NonNull<ListNode>>) {
-        self.next = next;
+    pub fn pin(address: usize, value: T) -> Pin<Self> {
+        unsafe { Pin::new_unchecked(Self::new(address, value)) }
     }
+}
 
-    /// Returns the previous node, if any.
-    pub fn prev(&self) -> Option<&ListNode> {
-        self.prev.as_ref().map(|ptr| unsafe { ptr.as_ref() })
+impl<T> AsMut<T> for BoxAt<T> {
+    fn as_mut(&mut self) -> &mut T {
+        unsafe { &mut *self.ptr }
     }
+}
 
-    /// Returns the previous node as mutable, if any.
-    pub fn prev_mut(&mut self) -> Option<&mut ListNode> {
-        self.prev.as_mut().map(|mut ptr| unsafe { ptr.as_mut() })
+impl<T> AsRef<T> for BoxAt<T> {
+    fn as_ref(&self) -> &T {
+        unsafe { &*self.ptr }
     }
+}
 
-    /// Sets the previous node.
-    pub fn set_prev(&mut self, prev: Option<NonNull<ListNode>>) {
-        self.prev = prev;
-    }
+impl<T: ?Sized> Deref for BoxAt<T> {
+    type Target = T;
 
-    /// Returns the address of the ListNode.
-    pub fn address(&self) -> usize {
-        self as *const ListNode as usize
+    fn deref(&self) -> &T {
+        unsafe { &*self.ptr }
     }
+}
 
-    pub fn as_ptr(&mut self) -> *mut ListNode {
-        self as *mut ListNode
+impl<T: ?Sized> DerefMut for BoxAt<T> {
+    fn deref_mut(&mut self) -> &mut T {
+        unsafe { &mut *self.ptr }
     }
+}
 
-    /// Creates a new ListNode at the given address.
-    ///
-    /// # Safety
-    ///
-    /// This function is unsafe because it allows creating a reference to an
-    /// arbitrary memory location.
-    pub unsafe fn new_at_address(address: usize) -> &'static mut ListNode {
-        let node = &mut *(address as *mut ListNode);
-        node.next = None;
-        node.prev = None;
-        node
-    }
+type Link<T> = Option<NonNull<T>>;
+
+pub unsafe trait Linked<L> {
+    type Handle;
+    fn into_ptr(r: Self::Handle) -> NonNull<Self>;
+    unsafe fn from_ptr(ptr: NonNull<Self>) -> Self::Handle;
+    unsafe fn links(ptr: NonNull<Self>) -> NonNull<L>;
+}
+
+pub struct Links<T: ?Sized> {
+    inner: UnsafeCell<LinksInner<T>>,
+}
+
+unsafe impl<T: Send> Send for Links<T> {}
+unsafe impl<T: Sync> Sync for Links<T> {}
+
+#[repr(C)]
+struct LinksInner<T: ?Sized> {
+    next: Link<T>,
+    prev: Link<T>,
+    /// Linked list links must always be `!Unpin`, in order to ensure that they
+    /// never recieve LLVM `noalias` annotations; see also
+    /// <https://github.com/rust-lang/rust/issues/63818>.
+    _unpin: PhantomPinned,
 }
 
 /// Intrusive doubly linked list.
-pub struct IntrusiveLinkedList {
-    head: Option<NonNull<ListNode>>,
-    tail: Option<NonNull<ListNode>>,
+pub struct IntrusiveLinkedList<T: Linked<Links<T>> + ?Sized> {
+    head: Link<T>,
+    tail: Link<T>,
     len: usize,
 }
 
-unsafe impl Send for IntrusiveLinkedList {}
+unsafe impl<T: Linked<Links<T>> + ?Sized> Send for IntrusiveLinkedList<T> where T: Send {}
+unsafe impl<T: Linked<Links<T>> + ?Sized> Sync for IntrusiveLinkedList<T> where T: Sync {}
 
-impl IntrusiveLinkedList {
+impl<T: Linked<Links<T>> + ?Sized> IntrusiveLinkedList<T> {
     /// Creates a new, empty IntrusiveLinkedList.
     pub const fn new() -> Self {
         Self {
@@ -102,76 +116,109 @@ impl IntrusiveLinkedList {
         }
     }
 
-    /// Adds a node to the front of the list.
-    pub fn push_front(&mut self, new: &mut ListNode) {
-        let mut new = NonNull::new(new as *mut ListNode).unwrap();
-        match self.head {
-            Some(mut head) => {
-                unsafe {
-                    new.as_mut().set_next(Some(head));
-                    head.as_mut().set_prev(Some(new));
-                }
-                self.head = Some(new);
+    pub fn pop_back(&mut self) -> Option<T::Handle> {
+        let tail = self.tail?;
+        self.len -= 1;
+
+        unsafe {
+            let mut tail_links = T::links(tail);
+            self.tail = tail_links.as_ref().prev();
+            debug_assert_eq!(
+                tail_links.as_ref().next(),
+                None,
+                "the tail node must not have a next link"
+            );
+
+            if let Some(prev) = tail_links.as_mut().prev() {
+                T::links(prev).as_mut().set_next(None);
+            } else {
+                self.head = None;
             }
-            None => {
-                self.head = Some(new);
-                self.tail = Some(new);
+
+            tail_links.as_mut().unlink();
+            Some(T::from_ptr(tail))
+        }
+    }
+
+    pub fn pop_front(&mut self) -> Option<T::Handle> {
+        let head = self.head?;
+        self.len -= 1;
+
+        unsafe {
+            let mut head_links = T::links(head);
+            self.head = head_links.as_ref().next();
+            if let Some(next) = head_links.as_mut().next() {
+                T::links(next).as_mut().set_prev(None);
+            } else {
+                self.tail = None;
+            }
+
+            head_links.as_mut().unlink();
+            Some(T::from_ptr(head))
+        }
+    }
+
+    pub fn push_back(&mut self, item: T::Handle) {
+        let ptr = T::into_ptr(item);
+        assert_ne!(self.tail, Some(ptr));
+        unsafe {
+            T::links(ptr).as_mut().set_next(None);
+            T::links(ptr).as_mut().set_prev(self.tail);
+            if let Some(tail) = self.tail {
+                T::links(tail).as_mut().set_next(Some(ptr));
             }
         }
+
+        self.tail = Some(ptr);
+        if self.head.is_none() {
+            self.head = Some(ptr);
+        }
+
         self.len += 1;
     }
 
-    /// Adds a node to the back of the list.
-    pub fn push_back(&mut self, new: &mut ListNode) {
-        let mut new = NonNull::new(new as *mut ListNode).unwrap();
-        match self.tail {
-            Some(mut tail) => {
-                unsafe {
-                    tail.as_mut().set_next(Some(new));
-                    new.as_mut().set_prev(Some(tail));
-                }
-                self.tail = Some(new);
-            }
-            None => {
-                self.head = Some(new);
-                self.tail = Some(new);
+    pub fn push_front(&mut self, item: T::Handle) {
+        let ptr = T::into_ptr(item);
+        assert_ne!(self.head, Some(ptr));
+        unsafe {
+            T::links(ptr).as_mut().set_next(self.head);
+            T::links(ptr).as_mut().set_prev(None);
+            if let Some(head) = self.head {
+                T::links(head).as_mut().set_prev(Some(ptr));
             }
         }
+
+        self.head = Some(ptr);
+
+        if self.tail.is_none() {
+            self.tail = Some(ptr);
+        }
+
         self.len += 1;
     }
 
-    /// Removes and returns the node from the front of the list.
-    pub fn pop_front(&mut self) -> Option<&mut ListNode> {
-        self.head.map(|mut head| {
-            if self.head == self.tail {
-                self.head = None;
-                self.tail = None;
-            } else {
-                self.head = unsafe { head.as_ref().next().map(|n| NonNull::from(n)) };
-                if let Some(mut new_head) = self.head {
-                    unsafe { new_head.as_mut().set_prev(None) };
-                }
-            }
-            self.len -= 1;
-            unsafe { head.as_mut() }
-        })
+    pub fn front(&self) -> Option<Pin<&T>> {
+        let head = self.head?;
+        let pin = unsafe { Pin::new_unchecked(head.as_ref()) };
+        Some(pin)
     }
 
-    /// Removes and returns the node from the back of the list.
-    pub fn pop_back(&mut self) -> Option<&mut ListNode> {
-        self.tail.map(|mut tail| {
-            if self.head == self.tail {
-                self.head = None;
-                self.tail = None;
-            } else {
-                self.tail = unsafe { tail.as_ref().prev().map(|p| NonNull::from(p)) };
-                if let Some(mut new_tail) = self.tail {
-                    unsafe { new_tail.as_mut().set_next(None) };
-                }
-            }
-            self.len -= 1;
-            unsafe { tail.as_mut() }
-        })
+    pub fn front_mut(&self) -> Option<Pin<&mut T>> {
+        let mut head = self.head?;
+        let pin = unsafe { Pin::new_unchecked(head.as_mut()) };
+        Some(pin)
+    }
+
+    pub fn back(&self) -> Option<Pin<&T>> {
+        let tail = self.tail?;
+        let pin = unsafe { Pin::new_unchecked(tail.as_ref()) };
+        Some(pin)
+    }
+
+    pub fn back_mut(&self) -> Option<Pin<&mut T>> {
+        let mut tail = self.tail?;
+        let pin = unsafe { Pin::new_unchecked(tail.as_mut()) };
+        Some(pin)
     }
 
     /// Returns `true` if the list is empty.
@@ -185,55 +232,105 @@ impl IntrusiveLinkedList {
     }
 }
 
+impl<T: ?Sized> Links<T> {
+    pub const fn new() -> Self {
+        Self {
+            inner: UnsafeCell::new(LinksInner {
+                next: None,
+                prev: None,
+                _unpin: PhantomPinned,
+            }),
+        }
+    }
+
+    pub fn is_linked(&self) -> bool {
+        self.next().is_some() || self.prev().is_some()
+    }
+
+    fn unlink(&mut self) {
+        self.inner.get_mut().next = None;
+        self.inner.get_mut().prev = None;
+    }
+
+    fn next(&self) -> Link<T> {
+        unsafe { (*self.inner.get()).next }
+    }
+
+    fn prev(&self) -> Link<T> {
+        unsafe { (*self.inner.get()).prev }
+    }
+
+    fn set_next(&mut self, next: Link<T>) -> Link<T> {
+        mem::replace(&mut self.inner.get_mut().next, next)
+    }
+
+    fn set_prev(&mut self, prev: Link<T>) -> Link<T> {
+        mem::replace(&mut self.inner.get_mut().prev, prev)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    extern crate std;
+    use std::boxed::Box;
     struct TestStruct {
-        next: ListNode,
+        links: Links<TestStruct>,
         val: u64,
     }
 
     impl TestStruct {
         pub fn new(val: u64) -> Self {
             Self {
-                next: ListNode::new(),
                 val,
+                links: Links::new(),
             }
+        }
+    }
+
+    unsafe impl Linked<Links<TestStruct>> for TestStruct {
+        type Handle = Pin<Box<Self>>;
+
+        fn into_ptr(handle: Pin<Box<TestStruct>>) -> NonNull<TestStruct> {
+            unsafe { NonNull::from(Box::leak(Pin::into_inner_unchecked(handle))) }
+        }
+
+        unsafe fn from_ptr(ptr: NonNull<TestStruct>) -> Pin<Box<TestStruct>> {
+            Pin::new_unchecked(Box::from_raw(ptr.as_ptr()))
+        }
+
+        unsafe fn links(target: NonNull<TestStruct>) -> NonNull<Links<TestStruct>> {
+            let links = ptr::addr_of_mut!((*target.as_ptr()).links);
+
+            NonNull::new_unchecked(links)
         }
     }
 
     #[test]
     fn test_list() {
-        let mut list = IntrusiveLinkedList::new();
+        let mut list = IntrusiveLinkedList::<TestStruct>::new();
 
-        let mut t1 = TestStruct::new(1);
-        let mut t2 = TestStruct::new(2);
-        let mut t3 = TestStruct::new(3);
-        let mut t4 = TestStruct::new(4);
+        for i in 0..5 {
+            list.push_back(Box::pin(TestStruct::new(i)));
+            assert_eq!(list.len(), (i + 1) as usize);
+        }
 
-        list.push_back(&mut t1.next);
-        assert!(list.len() == 1);
-        list.push_back(&mut t2.next);
-        assert!(list.len() == 2);
-        list.push_front(&mut t3.next);
-        assert!(list.len() == 3);
-        list.push_front(&mut t4.next);
-        assert!(list.len() == 4);
+        for i in 0..5 {
+            let e = list.pop_front().unwrap();
 
-        let t4_2 = unsafe { &*container_of!(list.pop_front().unwrap().as_ptr(), TestStruct, next) };
-        assert!(t4_2.val == t4.val);
-
-        let t2_2 = unsafe { &*container_of!(list.pop_back().unwrap().as_ptr(), TestStruct, next) };
-        assert!(t2_2.val == t2.val);
-
-        let t1_2 = unsafe { &*container_of!(list.pop_back().unwrap().as_ptr(), TestStruct, next) };
-        assert!(t1_2.val == t1.val);
-
-        // head == front now
-        let t3_2 = unsafe { &*container_of!(list.pop_back().unwrap().as_ptr(), TestStruct, next) };
-        assert!(t3_2.val == t3.val);
+            assert_eq!(e.val, i);
+        }
 
         assert!(list.pop_front().is_none());
         assert!(list.pop_back().is_none());
+
+        list.push_back(Box::pin(TestStruct::new(1)));
+
+        assert_eq!(list.front().unwrap().val, list.back().unwrap().val);
+
+        list.push_front(Box::pin(TestStruct::new(2)));
+
+        assert_eq!(list.pop_back().unwrap().val, 1);
+        assert_eq!(list.pop_front().unwrap().val, 2);
     }
 }

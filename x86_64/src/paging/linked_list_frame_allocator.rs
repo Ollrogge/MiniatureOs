@@ -5,14 +5,55 @@ use crate::{
     },
     serial_println,
 };
-use util::intrusive_linked_list::{IntrusiveLinkedList, ListNode};
+use core::{
+    pin::Pin,
+    ptr,
+    ptr::{addr_of_mut, NonNull},
+};
+use util::intrusive_linked_list::{BoxAt, IntrusiveLinkedList, Linked, Links};
+
+struct Node {
+    links: Links<Node>,
+}
+
+impl Node {
+    pub const fn new() -> Self {
+        Self {
+            links: Links::new(),
+        }
+    }
+
+    pub fn address(&self) -> usize {
+        self as *const Node as usize
+    }
+}
+
+unsafe impl Linked<Links<Node>> for Node {
+    type Handle = Pin<BoxAt<Self>>;
+
+    fn into_ptr(handle: Self::Handle) -> NonNull<Node> {
+        unsafe { NonNull::from(BoxAt::leak(Pin::into_inner_unchecked(handle))) }
+
+        //unsafe { NonNull::new_unchecked(Pin::into_inner_unchecked(handle) as *mut Node) }
+    }
+
+    unsafe fn from_ptr(ptr: NonNull<Node>) -> Self::Handle {
+        Pin::new_unchecked(BoxAt::from_raw(ptr.as_ptr()))
+    }
+
+    unsafe fn links(target: NonNull<Node>) -> NonNull<Links<Node>> {
+        let links = ptr::addr_of_mut!((*target.as_ptr()).links);
+        NonNull::new_unchecked(links)
+    }
+}
 
 // This frame allocator assumes that the complete physical memory space is mapped
 // at an offset in the virtual memory space
 pub struct LinkedListFrameAllocator {
-    free_list: IntrusiveLinkedList,
+    free_list: IntrusiveLinkedList<Node>,
     // just out of interest
     free_list_size: usize,
+    // offset of physical address in virtual address space
     offset: usize,
 }
 
@@ -48,11 +89,10 @@ impl LinkedListFrameAllocator {
                 .iter()
                 .for_each(|page| {
                     //serial_println!("Pushing to list: {:#x}", frame.start());
-                    let node = unsafe {
-                        ListNode::new_at_address(
-                            usize::try_from(page.start_address().as_u64()).unwrap(),
-                        )
-                    };
+                    let node = BoxAt::pin(
+                        usize::try_from(page.start_address().as_u64()).unwrap(),
+                        Node::new(),
+                    );
 
                     self.free_list.push_front(node);
                     sz += 1;
@@ -80,9 +120,10 @@ unsafe impl FrameAllocator<Size4KiB> for LinkedListFrameAllocator {
     }
 
     fn deallocate_frame(&mut self, frame: PhysicalFrame<Size4KiB>) {
-        let node = unsafe {
-            ListNode::new_at_address(usize::try_from(frame.start()).unwrap() + self.offset)
-        };
+        let node = BoxAt::pin(
+            usize::try_from(frame.start()).unwrap() + self.offset,
+            Node::new(),
+        );
 
         self.free_list.push_front(node);
         self.free_list_size += 1;

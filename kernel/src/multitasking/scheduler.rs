@@ -14,8 +14,6 @@ use core::{
 use util::mutex::{Mutex, MutexGuard};
 use x86_64::instructions::hlt;
 
-// Scheduler cant be protected by a mutex since it will not be dropped on task switch
-// which leads to a deadlock
 static mut SCHEDULER: Scheduler = {
     Scheduler {
         ready_threads: VecDeque::new(),
