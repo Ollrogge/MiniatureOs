@@ -13,6 +13,7 @@ pub trait VirtualMemoryObject {
 
 // commited page = OS has allocated physical memory for it
 
+#[derive(Default)]
 pub struct MemoryBackedVirtualMemoryObject {
     frames: Vec<PhysicalFrame>,
 }

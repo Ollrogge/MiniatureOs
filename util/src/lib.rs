@@ -2,6 +2,7 @@
 #[cfg(feature = "kernel")]
 pub mod hashmap;
 pub mod intrusive_linked_list;
+pub mod mpsc_queue;
 pub mod mutex;
 #[cfg(feature = "kernel")]
 pub mod range_allocator;

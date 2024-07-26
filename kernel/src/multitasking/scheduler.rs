@@ -7,17 +7,82 @@ use alloc::{boxed::Box, collections::VecDeque, string::String, sync::Arc, vec::V
 use core::{
     arch::asm,
     cell::UnsafeCell,
+    ops::{Deref, DerefMut},
     pin::Pin,
-    ptr::addr_of_mut,
+    ptr::{self, addr_of_mut, NonNull},
     sync::atomic::{AtomicBool, Ordering},
 };
-use util::mutex::{Mutex, MutexGuard};
+use lazy_static::lazy_static;
+use util::{
+    intrusive_linked_list::Linked,
+    mpsc_queue::{Links, MpscQueue},
+    mutex::{Mutex, MutexGuard},
+};
 use x86_64::instructions::hlt;
+
+// Wrapper around thread to fulfill mpsc's need for a stub entry
+#[derive(Default)]
+pub struct ThreadEntry {
+    pub links: Links<ThreadEntry>,
+    inner: Option<Thread>,
+}
+
+impl Unpin for ThreadEntry {}
+
+impl ThreadEntry {
+    pub fn new(thread: Thread) -> Pin<Box<Self>> {
+        Box::pin(Self {
+            links: Links::new(),
+            inner: Some(thread),
+        })
+    }
+
+    pub const fn new_const() -> Self {
+        Self {
+            links: Links::new(),
+            inner: None,
+        }
+    }
+}
+
+impl Deref for ThreadEntry {
+    type Target = Thread;
+
+    fn deref(&self) -> &Self::Target {
+        self.inner.as_ref().unwrap()
+    }
+}
+
+impl DerefMut for ThreadEntry {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.inner.as_mut().expect("ThreadEntry inner is None")
+    }
+}
+
+unsafe impl Linked<Links<ThreadEntry>> for ThreadEntry {
+    type Handle = Pin<Box<Self>>;
+
+    fn into_ptr(handle: Self::Handle) -> NonNull<ThreadEntry> {
+        unsafe { NonNull::from(Box::leak(Pin::into_inner_unchecked(handle))) }
+    }
+
+    unsafe fn from_ptr(ptr: NonNull<Self>) -> Self::Handle {
+        Pin::new_unchecked(Box::from_raw(ptr.as_ptr()))
+    }
+
+    unsafe fn links(target: NonNull<Self>) -> NonNull<Links<Self>> {
+        let links = ptr::addr_of_mut!((*target.as_ptr()).links);
+
+        NonNull::new_unchecked(links)
+    }
+}
+
+static THREAD_ENTRY_STUB: ThreadEntry = ThreadEntry::new_const();
 
 static mut SCHEDULER: Scheduler = {
     Scheduler {
         ready_threads: VecDeque::new(),
-        dying_threads: Mutex::new(VecDeque::new()),
+        dying_threads: unsafe { MpscQueue::new_with_static_stub(&THREAD_ENTRY_STUB) },
         running_thread: None,
         running_thread_is_finished: AtomicBool::new(false),
     }
@@ -25,9 +90,7 @@ static mut SCHEDULER: Scheduler = {
 
 pub struct Scheduler {
     ready_threads: VecDeque<Thread>,
-    // todo: this needs to be a rwlock or finializer thread + schedule could
-    // deadlock each other
-    dying_threads: Mutex<VecDeque<Thread>>,
+    pub dying_threads: MpscQueue<ThreadEntry>,
     running_thread: Option<Thread>,
     running_thread_is_finished: AtomicBool,
 }
@@ -49,10 +112,6 @@ impl Scheduler {
         loop {
             hlt();
         }
-    }
-
-    pub fn dying_threads(&mut self) -> MutexGuard<VecDeque<Thread>> {
-        self.dying_threads.lock()
     }
 
     pub fn init(mut thread: Thread) {
@@ -90,7 +149,7 @@ impl Scheduler {
             */
 
             if self.running_thread_is_finished.load(Ordering::SeqCst) {
-                self.dying_threads.lock().push_back(old_thread);
+                self.dying_threads.enqueue(ThreadEntry::new(old_thread));
                 self.running_thread_is_finished
                     .store(false, Ordering::Relaxed);
             } else {
@@ -128,9 +187,9 @@ unsafe extern "C" fn task_switch(old_rsp: *mut u64, new_rsp: u64, old_cr3: u64, 
         "mov [rdi], rsp",
         "mov rsp, rsi",
         "cmp rdx, rcx",
-        "je 1f",
+        "je 2f",
         "mov cr3, rcx",
-        "1:",
+        "2:",
         restore_state!(),
         "ret",
         options(noreturn)

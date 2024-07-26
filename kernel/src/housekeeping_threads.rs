@@ -28,26 +28,23 @@ pub fn spawn_finalizer_thread() -> Result<(), KernelError> {
 
 extern "C" fn finializer_thread_func() -> ! {
     serial_println!("Finalizer thread enter");
+    // Obtain exclusive comsumer right to the dying threads queue
+    let consumer = unsafe {
+        Scheduler::the()
+            .dying_threads
+            .try_consume()
+            .expect("Finalizer thread was unable to become consumer for dying threads")
+    };
     loop {
-        let mut work = Vec::new();
-        {
-            let mut dying_threads = unsafe { Scheduler::the().dying_threads() };
-            for _ in 0..3 {
-                if let Some(t) = dying_threads.pop_front() {
-                    work.push(t);
-                } else {
-                    break;
+        for _ in 0..3 {
+            if let Some(mut thread) = consumer.dequeue() {
+                if let Err(err) = thread.finalize() {
+                    serial_println!("Failed to finialze thread: {}", err);
                 }
+                drop(thread);
+            } else {
+                break;
             }
-        }
-
-        for mut thread in work {
-            let res = thread.finalize();
-            if let Err(err) = res {
-                serial_println!("Failed to finialize thread: {}", err);
-            }
-
-            drop(thread)
         }
 
         hlt();

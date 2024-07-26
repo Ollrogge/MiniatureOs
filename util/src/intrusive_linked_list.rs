@@ -4,7 +4,7 @@
 //!
 //! In usual linked lists the list contains a data pointer to the data
 //!
-//! The current linked list implementation is basically small version of
+//! Current implementation is small version of
 //! https://mycelium.elizas.website/cordyceps/list/index.html
 //!
 use core::{
@@ -114,6 +114,10 @@ impl<T: Linked<Links<T>> + ?Sized> IntrusiveLinkedList<T> {
             tail: None,
             len: 0,
         }
+    }
+
+    unsafe fn links<'a>(ptr: NonNull<T>) -> &'a Links<T> {
+        T::links(ptr).as_ref()
     }
 
     pub fn pop_back(&mut self) -> Option<T::Handle> {
@@ -291,7 +295,7 @@ mod tests {
     unsafe impl Linked<Links<TestStruct>> for TestStruct {
         type Handle = Pin<Box<Self>>;
 
-        fn into_ptr(handle: Pin<Box<TestStruct>>) -> NonNull<TestStruct> {
+        fn into_ptr(handle: Self::Handle) -> NonNull<TestStruct> {
             unsafe { NonNull::from(Box::leak(Pin::into_inner_unchecked(handle))) }
         }
 
@@ -326,6 +330,7 @@ mod tests {
 
         list.push_back(Box::pin(TestStruct::new(1)));
 
+        // 1 item in list => head == tail
         assert_eq!(list.front().unwrap().val, list.back().unwrap().val);
 
         list.push_front(Box::pin(TestStruct::new(2)));

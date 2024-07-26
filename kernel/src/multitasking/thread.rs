@@ -10,12 +10,9 @@ use crate::{
     serial_println,
 };
 use alloc::{boxed::Box, string::String, sync::Arc, vec, vec::Vec};
-use core::{pin::Pin, slice};
-use util::mutex::Mutex;
-use x86_64::{
-    memory::{Address, PhysicalAddress, VirtualAddress, VirtualRange, KIB},
-    register::RFlags,
-};
+use core::{pin::Pin, ptr::NonNull, slice};
+use util::{intrusive_linked_list::Linked, mpsc_queue::Links, mutex::Mutex};
+use x86_64::register::RFlags;
 pub type ThreadEntryFunc = extern "C" fn() -> !;
 
 #[repr(C, packed)]
@@ -56,6 +53,7 @@ pub enum ThreadPriority {
     High,
     Max,
 }
+use core::ptr;
 
 pub struct Thread {
     name: String,

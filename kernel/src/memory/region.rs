@@ -8,7 +8,7 @@ use crate::{
     serial_println,
 };
 use alloc::{collections::BTreeMap, string::String, vec::Vec};
-use core::{borrow::Borrow, ops::Drop};
+use core::{borrow::Borrow, default, ops::Drop};
 use util::range_allocator::{self, RangeAllocator};
 use x86_64::{
     memory::{
@@ -23,11 +23,12 @@ pub enum AccessType {
     ReadWrite,
 }
 
-#[derive(PartialEq, Clone, Copy, Debug)]
+#[derive(PartialEq, Clone, Copy, Debug, Default)]
 pub enum RegionType {
     Stack,
     Heap,
     Elf,
+    #[default]
     Other,
 }
 
@@ -147,6 +148,7 @@ impl RegionTree {
 
 //Region with a base address, size and permissions
 // Only knows to which VMObject it refers to, no physical frame
+#[derive(Default)]
 pub struct VirtualMemoryRegion<U: VirtualMemoryObject> {
     range: PageRangeInclusive,
     name: String,

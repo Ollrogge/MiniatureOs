@@ -380,7 +380,7 @@ impl LowerHex for PhysicalAddress {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
 pub struct VirtualAddress(u64);
 
 impl VirtualAddress {
@@ -676,7 +676,7 @@ impl<S: PageSize> AddAssign<u64> for PhysicalFrame<S> {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
 pub struct Page<S: PageSize = Size4KiB> {
     pub address: VirtualAddress,
     pub size: PhantomData<S>,
@@ -733,6 +733,15 @@ impl<S: PageSize> Page<S> {
 pub struct PageRangeInclusive<S: PageSize = Size4KiB> {
     pub start_page: Page<S>,
     pub end_page: Page<S>,
+}
+
+impl<S: PageSize> Default for PageRangeInclusive<S> {
+    fn default() -> Self {
+        Self {
+            start_page: Page::containing_address(VirtualAddress::new(0)),
+            end_page: Page::containing_address(VirtualAddress::new(0)),
+        }
+    }
 }
 
 impl<S: PageSize> Into<Range<u64>> for PageRangeInclusive<S> {
