@@ -5,6 +5,21 @@ Miniature hobby bootloader & POSIX-compatible kernel to teach me the basic conce
 
 </div>
 
+### Build
+**Add nightly toolchain**
+```bash
+rustup target add x86_64-unknown-none
+```
+
+**Configure cargo**
+Add the following to `.cargo/config.toml`:
+```toml
+ [unstable]
+  # enable the unstable artifact-dependencies feature, see
+  # https://doc.rust-lang.org/nightly/cargo/reference/unstable.html#artifact-dependencies
+  bindeps = true
+```
+
 ### Notes
 - This is a very early work in progress which mainly consists of only a bootloader at the moment.
 
