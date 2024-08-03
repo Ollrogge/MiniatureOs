@@ -3,6 +3,7 @@
 #![feature(naked_functions)]
 #![feature(const_mut_refs)]
 #![feature(concat_idents)]
+#![feature(maybe_uninit_uninit_array)]
 use api::BootInfo;
 use error::KernelError;
 extern crate alloc;

@@ -13,14 +13,14 @@ use core::{
     mem,
     ops::{Deref, DerefMut},
     pin::Pin,
-    ptr,
-    ptr::NonNull,
+    ptr::{self, NonNull},
 };
 
 pub struct BoxAt<T: ?Sized> {
     ptr: *mut T,
 }
 
+// Smart pointer pointing raw memory
 impl<T> BoxAt<T> {
     pub fn new(address: usize, value: T) -> Self {
         let ptr = address as *mut T;
@@ -35,12 +35,21 @@ impl<T> BoxAt<T> {
         Self { ptr }
     }
 
+    pub unsafe fn from_address(address: usize) -> BoxAt<T> {
+        let ptr = address as *mut T;
+        Self { ptr }
+    }
+
     pub fn leak(self) -> &'static mut T {
         unsafe { &mut *self.ptr }
     }
 
     pub fn pin(address: usize, value: T) -> Pin<Self> {
         unsafe { Pin::new_unchecked(Self::new(address, value)) }
+    }
+
+    pub fn into_raw(self) -> *mut T {
+        self.ptr
     }
 }
 
@@ -201,6 +210,58 @@ impl<T: Linked<Links<T>> + ?Sized> IntrusiveLinkedList<T> {
         self.len += 1;
     }
 
+    pub fn contains(&self, item: NonNull<T>) -> bool {
+        for e in self.iter() {
+            let ptr = e as *const T;
+            if ptr::addr_eq(ptr, item.as_ptr()) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    pub fn remove_checked(&mut self, item: NonNull<T>) -> Option<T::Handle> {
+        if !self.contains(item) {
+            return None;
+        }
+
+        unsafe { self.remove(item) }
+    }
+
+    /// Safety: Item **must** be part of this list. Else this function is dereferencing
+    /// unchecked pointers
+    pub unsafe fn remove(&mut self, item: NonNull<T>) -> Option<T::Handle> {
+        let mut links = T::links(item);
+        let links = links.as_mut();
+
+        let prev = links.set_prev(None);
+        let next = links.set_next(None);
+
+        if let Some(prev) = prev {
+            T::links(prev).as_mut().set_next(next);
+        // only head doesnt have a prev
+        } else if self.head != Some(item) {
+            return None;
+        } else {
+            assert_ne!(Some(item), next, "node must not be linked to itself");
+            self.head = next;
+        }
+
+        if let Some(next) = next {
+            T::links(next).as_mut().set_prev(prev);
+        // only tail doesnt have a next
+        } else if self.tail != Some(item) {
+            return None;
+        } else {
+            assert_ne!(Some(item), prev, "node must not be linked to itself");
+            self.tail = prev;
+        }
+
+        self.len -= 1;
+        Some(T::from_ptr(item))
+    }
+
     pub fn front(&self) -> Option<Pin<&T>> {
         let head = self.head?;
         let pin = unsafe { Pin::new_unchecked(head.as_ref()) };
@@ -233,6 +294,24 @@ impl<T: Linked<Links<T>> + ?Sized> IntrusiveLinkedList<T> {
     /// Returns the length of the list.
     pub fn len(&self) -> usize {
         self.len
+    }
+
+    pub fn iter(&self) -> Iter<'_, T> {
+        Iter {
+            _list: self,
+            curr: self.head,
+            len: self.len(),
+        }
+    }
+
+    pub fn iter_mut(&mut self) -> IterMut<'_, T> {
+        let head = self.head;
+        let len = self.len();
+        IterMut {
+            _list: self,
+            curr: head,
+            len: len,
+        }
     }
 }
 
@@ -273,6 +352,121 @@ impl<T: ?Sized> Links<T> {
     }
 }
 
+/// Iterates over the items in a [`List`] by reference.
+pub struct Iter<'list, T: Linked<Links<T>> + ?Sized> {
+    _list: &'list IntrusiveLinkedList<T>,
+
+    /// The current node when iterating head -> tail.
+    curr: Link<T>,
+
+    /// The number of remaining entries in the iterator.
+    len: usize,
+}
+
+impl<'list, T: Linked<Links<T>> + ?Sized> ExactSizeIterator for Iter<'list, T> {
+    #[inline]
+    fn len(&self) -> usize {
+        self.len
+    }
+}
+
+impl<'list, T: Linked<Links<T>> + ?Sized> Iterator for Iter<'list, T> {
+    type Item = &'list T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.len == 0 {
+            return None;
+        }
+
+        let curr = self.curr.take()?;
+        self.len -= 1;
+        unsafe {
+            // safety: it is safe for us to borrow `curr`, because the iterator
+            // borrows the `List`, ensuring that the list will not be dropped
+            // while the iterator exists. the returned item will not outlive the
+            // iterator.
+            self.curr = T::links(curr).as_ref().next();
+            Some(curr.as_ref())
+        }
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.len();
+        (len, Some(len))
+    }
+}
+
+pub struct IterMut<'list, T: Linked<Links<T>> + ?Sized> {
+    _list: &'list mut IntrusiveLinkedList<T>,
+
+    /// The current node when iterating head -> tail.
+    curr: Link<T>,
+
+    /// The number of remaining entries in the iterator.
+    len: usize,
+}
+
+impl<'list, T: Linked<Links<T>> + ?Sized> ExactSizeIterator for IterMut<'list, T> {
+    #[inline]
+    fn len(&self) -> usize {
+        self.len
+    }
+}
+
+impl<'list, T: Linked<Links<T>> + ?Sized> Iterator for IterMut<'list, T> {
+    type Item = Pin<&'list mut T>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.len == 0 {
+            return None;
+        }
+
+        let mut curr = self.curr.take()?;
+        self.len -= 1;
+        unsafe {
+            // safety: it is safe for us to borrow `curr`, because the iterator
+            // borrows the `List`, ensuring that the list will not be dropped
+            // while the iterator exists. the returned item will not outlive the
+            // iterator.
+            self.curr = T::links(curr).as_ref().next();
+
+            // safety: pinning the returned element is actually *necessary* to
+            // uphold safety invariants here. if we returned `&mut T`, the
+            // element could be `mem::replace`d out of the list, invalidating
+            // any pointers to it. thus, we *must* pin it before returning it.
+            let pin = Pin::new_unchecked(curr.as_mut());
+            Some(pin)
+        }
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.len();
+        (len, Some(len))
+    }
+}
+
+impl<'list, T: Linked<Links<T>> + ?Sized> IntoIterator for &'list IntrusiveLinkedList<T> {
+    type Item = &'list T;
+    type IntoIter = Iter<'list, T>;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'list, T: Linked<Links<T>> + ?Sized> IntoIterator for &'list mut IntrusiveLinkedList<T> {
+    type Item = Pin<&'list mut T>;
+    type IntoIter = IterMut<'list, T>;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter_mut()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -292,15 +486,20 @@ mod tests {
         }
     }
 
+    // Don't think we need Pin here. The linked list itself must make sure that
+    // when returning references to elements which are currently in the linked list,
+    // these references are Pinned. However for remove, pop_front or pop_back, the
+    // ptr doesnt have to be pinned anymore since it is not part of the linked
+    // list
     unsafe impl Linked<Links<TestStruct>> for TestStruct {
-        type Handle = Pin<Box<Self>>;
+        type Handle = Box<Self>;
 
         fn into_ptr(handle: Self::Handle) -> NonNull<TestStruct> {
-            unsafe { NonNull::from(Box::leak(Pin::into_inner_unchecked(handle))) }
+            NonNull::from(Box::leak(handle))
         }
 
-        unsafe fn from_ptr(ptr: NonNull<TestStruct>) -> Pin<Box<TestStruct>> {
-            Pin::new_unchecked(Box::from_raw(ptr.as_ptr()))
+        unsafe fn from_ptr(ptr: NonNull<TestStruct>) -> Box<TestStruct> {
+            Box::from_raw(ptr.as_ptr())
         }
 
         unsafe fn links(target: NonNull<TestStruct>) -> NonNull<Links<TestStruct>> {
@@ -315,7 +514,7 @@ mod tests {
         let mut list = IntrusiveLinkedList::<TestStruct>::new();
 
         for i in 0..5 {
-            list.push_back(Box::pin(TestStruct::new(i)));
+            list.push_back(Box::new(TestStruct::new(i)));
             assert_eq!(list.len(), (i + 1) as usize);
         }
 
@@ -328,12 +527,12 @@ mod tests {
         assert!(list.pop_front().is_none());
         assert!(list.pop_back().is_none());
 
-        list.push_back(Box::pin(TestStruct::new(1)));
+        list.push_back(Box::new(TestStruct::new(1)));
 
         // 1 item in list => head == tail
         assert_eq!(list.front().unwrap().val, list.back().unwrap().val);
 
-        list.push_front(Box::pin(TestStruct::new(2)));
+        list.push_front(Box::new(TestStruct::new(2)));
 
         assert_eq!(list.pop_back().unwrap().val, 1);
         assert_eq!(list.pop_front().unwrap().val, 2);

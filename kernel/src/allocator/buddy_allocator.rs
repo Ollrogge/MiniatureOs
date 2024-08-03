@@ -9,9 +9,13 @@ use alloc::{
 };
 use core::{
     cmp::{max, min},
+    mem,
     mem::MaybeUninit,
+    pin::Pin,
+    ptr,
     ptr::NonNull,
 };
+use util::intrusive_linked_list::{BoxAt, IntrusiveLinkedList, Linked, Links};
 use x86_64::memory::{
     Address, FrameAllocator, MemoryRegion, PageSize, PhysicalAddress, PhysicalFrame,
     PhysicalMemoryRegion, PhysicalMemoryRegionType, Region, Size2MiB, Size4KiB, VirtualAddress,
@@ -51,30 +55,20 @@ trait LinkedListTrait {
     fn is_empty(&self) -> bool;
 }
 
-#[derive(Clone, Copy)]
 pub struct Chunk {
-    next: Option<NonNull<Chunk>>,
+    links: Links<Chunk>,
+    // Technically not nedded but maybe interesting for statistics
     size: usize,
 }
 
 unsafe impl Send for Chunk {}
 
 impl Chunk {
-    pub fn reset(&mut self) {
-        self.next = None;
-        self.size = 0;
-    }
-
-    pub fn new(next: Option<NonNull<Chunk>>, size: usize) -> Self {
-        Self { next, size }
-    }
-
-    pub unsafe fn new_at_address(address: VirtualAddress, size: usize) -> &'static mut Chunk {
-        let node: &'static mut Chunk = &mut *address.as_mut_ptr();
-        node.size = size;
-        node.next = None;
-
-        node
+    pub fn new(size: usize) -> Self {
+        Self {
+            links: Links::new(),
+            size,
+        }
     }
 
     pub fn size(&self) -> usize {
@@ -85,145 +79,36 @@ impl Chunk {
         self as *const Self as u64
     }
 
-    pub fn address(&self) -> VirtualAddress {
-        VirtualAddress::new(self.start())
+    pub fn address(&self) -> usize {
+        self as *const Self as usize
     }
 }
 
-// Linked list providing its own storage for the nodes
-struct LinkedListWithStorage {
-    // You can think of MaybeUninit<T> as being a bit like Option<T>
-    // but without any of the run-time tracking and without any of the safety checks.
-    pub nodes: [MaybeUninit<Chunk>; LIST_SIZE],
-    pub head: Option<NonNull<Chunk>>,
-}
+unsafe impl Linked<Links<Chunk>> for Chunk {
+    type Handle = BoxAt<Self>;
 
-impl LinkedListWithStorage {
-    pub fn new() -> Self {
-        const UNINIT: MaybeUninit<Chunk> = MaybeUninit::uninit();
-
-        let mut list = Self {
-            nodes: [UNINIT; LIST_SIZE],
-            head: None,
-        };
-
-        for node in &mut list.nodes {
-            let node_ptr: *mut Chunk = node.as_mut_ptr();
-            let node_ref = unsafe { &mut *node_ptr };
-
-            node_ref.next = list.head;
-            list.head = Some(NonNull::new(node_ptr).unwrap());
-        }
-
-        list
+    fn into_ptr(handle: Self::Handle) -> NonNull<Chunk> {
+        NonNull::from(BoxAt::leak(handle))
     }
 
-    fn push_front(&mut self, block: *mut Chunk) {
-        unsafe {
-            (*block).next = self.head;
-        }
-        self.head = Some(NonNull::new(block).unwrap());
-    }
-}
-
-impl LinkedListTrait for LinkedListWithStorage {
-    fn pop_front(&mut self) -> Option<NonNull<Chunk>> {
-        if let Some(mut block) = self.head.take() {
-            self.head = unsafe { block.as_mut().next.take() };
-            Some(block)
-        } else {
-            None
-        }
+    unsafe fn from_ptr(ptr: NonNull<Chunk>) -> Self::Handle {
+        BoxAt::from_raw(ptr.as_ptr())
     }
 
-    fn remove(&mut self, _: u64) -> Option<NonNull<Chunk>> {
-        None
-    }
-
-    fn is_empty(&self) -> bool {
-        self.head.is_none()
-    }
-
-    fn front(&self) -> Option<NonNull<Chunk>> {
-        self.head.as_ref().map(|non_null| non_null.clone())
-    }
-}
-
-#[derive(Clone, Copy)]
-struct LinkedList {
-    // You can think of MaybeUninit<T> as being a bit like Option<T>
-    // but without any of the run-time tracking and without any of the safety checks.
-    pub head: Option<NonNull<Chunk>>,
-}
-
-unsafe impl Send for LinkedList {}
-
-impl LinkedList {
-    pub const fn new() -> Self {
-        Self { head: None }
-    }
-
-    /// Add a node to the list.
-    /// O(1) runtime
-    fn push_front(&mut self, block: &mut Chunk) {
-        block.next = self.head;
-        self.head = Some(NonNull::new(block).unwrap());
-    }
-}
-
-impl LinkedListTrait for LinkedList {
-    fn pop_front(&mut self) -> Option<NonNull<Chunk>> {
-        if let Some(mut block) = self.head.take() {
-            self.head = unsafe { block.as_mut().next.take() };
-            Some(block)
-        } else {
-            None
-        }
-    }
-
-    fn is_empty(&self) -> bool {
-        self.head.is_none()
-    }
-
-    fn front(&self) -> Option<NonNull<Chunk>> {
-        self.head.as_ref().map(|non_null| non_null.clone())
-    }
-    /// Remove node starting at start from list.
-    /// takes O(n) time
-    fn remove(&mut self, start: u64) -> Option<NonNull<Chunk>> {
-        let mut last_chunk: Option<NonNull<Chunk>> = None;
-        let mut cur_chunk = self.front();
-
-        while let Some(mut node_ptr) = cur_chunk {
-            let node = unsafe { node_ptr.as_mut() };
-            if node.start() == start {
-                // If the node to be removed is found, update the links
-                match last_chunk {
-                    Some(mut last_chunk_ptr) => unsafe { last_chunk_ptr.as_mut().next = node.next },
-                    None => self.head = node.next,
-                }
-
-                // Return the mutable reference to the removed node
-                return Some(node_ptr);
-            }
-
-            // Move to the next node
-            last_chunk = cur_chunk;
-            cur_chunk = node.next;
-        }
-
-        None
+    unsafe fn links(target: NonNull<Chunk>) -> NonNull<Links<Chunk>> {
+        let links = ptr::addr_of_mut!((*target.as_ptr()).links);
+        NonNull::new_unchecked(links)
     }
 }
 
 pub struct BuddyAllocator {
-    buddies: [LinkedList; MAX_ORDER],
+    buddies: [Option<IntrusiveLinkedList<Chunk>>; MAX_ORDER],
 }
 
 impl<'a> BuddyAllocator {
     pub const fn new() -> Self {
         Self {
-            buddies: [LinkedList::new(); MAX_ORDER],
+            buddies: [const { None }; MAX_ORDER],
         }
     }
 
@@ -266,11 +151,15 @@ impl<'a> BuddyAllocator {
                 1 << (MAX_ORDER - 1),
             );
 
-            let chunk =
-                unsafe { Chunk::new_at_address(VirtualAddress::new(current_start), size as usize) };
+            let chunk = BoxAt::new(
+                usize::try_from(current_start).unwrap(),
+                Chunk::new(size as usize),
+            );
 
             // 0b100 => 2 trailing zeros
-            self.buddies[size.trailing_zeros() as usize].push_front(chunk);
+            self.buddies[size.trailing_zeros() as usize]
+                .get_or_insert_with(IntrusiveLinkedList::new)
+                .push_front(chunk);
             current_start += size;
         }
     }
@@ -288,36 +177,42 @@ impl<'a> BuddyAllocator {
             layout.size().next_power_of_two(),
             max(layout.align(), Self::min_size()),
         )
+        .next_power_of_two()
     }
 
     /// Alloc a power of two sized range of memory satisfying the layout requirement
-    pub unsafe fn alloc(&mut self, layout: Layout) -> Option<NonNull<Chunk>> {
+    pub unsafe fn alloc(&mut self, layout: Layout) -> Option<BoxAt<Chunk>> {
         let size = Self::align_layout_size(layout);
+        assert_eq!(size % 2, 0);
         let class = size.trailing_zeros() as usize;
         // Find first non-empty size class
         for i in class..self.buddies.len() {
-            if self.buddies[i].is_empty() {
+            if self.buddies[i]
+                .get_or_insert_with(IntrusiveLinkedList::new)
+                .is_empty()
+            {
                 continue;
             }
 
             // split buddies to obtain a chunk closest to the size we want to allocate
-            // traverse through multiple size layers if needed
-            // Only needed when i > class
+            // traverse through multiple size layers if needed (Only required when i > class)
             for j in (class + 1..i + 1).rev() {
-                if let Some(mut chunk_ptr) = self.buddies[j].pop_front() {
+                if let Some(chunk) = self.buddies[j]
+                    .get_or_insert_with(IntrusiveLinkedList::new)
+                    .pop_front()
+                {
+                    let list = self.buddies[j - 1].get_or_insert_with(IntrusiveLinkedList::new);
+
                     // create two buddies of size class n -1 from 1 chunk of size
                     // class n
-                    let chunk = chunk_ptr.as_mut();
-
-                    let sz = 1 << (j - 1);
                     let addr = chunk.address();
-                    let split_node1 = unsafe { Chunk::new_at_address(addr, sz) };
-                    self.buddies[j - 1].push_front(split_node1);
-
                     let sz = 1 << (j - 1);
-                    let addr = chunk.address() + sz;
-                    let split_node2 = unsafe { Chunk::new_at_address(addr, sz) };
-                    self.buddies[j - 1].push_front(split_node2);
+
+                    let split_node1 = BoxAt::new(addr, Chunk::new(sz));
+                    list.push_front(split_node1);
+
+                    let split_node2 = BoxAt::new(addr + sz, Chunk::new(sz));
+                    list.push_front(split_node2);
                 } else {
                     return None;
                 }
@@ -325,37 +220,45 @@ impl<'a> BuddyAllocator {
             break;
         }
 
-        self.buddies[class].pop_front()
+        self.buddies[class].as_mut().unwrap().pop_front()
     }
 
-    pub fn dealloc(&mut self, chunk: NonNull<Chunk>) {
-        let chunk = unsafe { chunk.as_ref() };
+    pub fn dealloc(&mut self, chunk: BoxAt<Chunk>) {
         let mut current_class = chunk.size().trailing_zeros() as usize;
+
+        // keep track of the region we are merging
         let mut region = Region::new(chunk.start(), chunk.size());
 
         // keep merging buddies and moving 1 size class up until not possible anymore
         while current_class < self.buddies.len() {
-            let mut buddy = region.clone();
             // buddy addresses differ by exactly 1 bit (the bit corresponding to the bit size)
             // therefore we can get buddy address by simply toggling the size bit
-            buddy.set_start(region.start() ^ (1 << current_class));
-            // TODO: removing a buddy is O(N). Could be sped up by using e.g. a B-Tree
-            match self.buddies[current_class].remove(buddy.start()) {
+            let buddy: BoxAt<Chunk> = unsafe {
+                BoxAt::from_address(usize::try_from(region.start() ^ (1 << current_class)).unwrap())
+            };
+
+            let buddy_start = buddy.start();
+
+            match self.buddies[current_class]
+                .get_or_insert_with(IntrusiveLinkedList::new)
+                .remove_checked(unsafe { NonNull::new_unchecked(BoxAt::leak(buddy)) })
+            {
                 // merge two buddies
                 Some(_) => {
                     // adjust region for higher size class
-                    region.set_start(min(region.start(), buddy.start()));
+                    region.set_start(min(region.start(), buddy_start));
                     region.set_size(region.size() * 2);
-
                     current_class += 1;
                 }
                 None => {
-                    let addr = VirtualAddress::new(region.start());
-                    let sz = region.size();
+                    let chunk = BoxAt::new(
+                        usize::try_from(region.start()).unwrap(),
+                        Chunk::new(region.size()),
+                    );
 
-                    let chunk = unsafe { Chunk::new_at_address(addr, sz) };
-
-                    self.buddies[current_class].push_front(chunk);
+                    self.buddies[current_class]
+                        .get_or_insert_with(IntrusiveLinkedList::new)
+                        .push_front(chunk);
                     break;
                 }
             }
@@ -367,15 +270,17 @@ unsafe impl GlobalAlloc for Locked<BuddyAllocator> {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let mut allocator = self.lock();
         match allocator.alloc(layout) {
-            Some(chunk) => chunk.as_ptr() as *mut u8,
+            Some(chunk) => BoxAt::into_raw(chunk) as *mut u8,
             None => panic!("Allocator ran out of memory"),
         }
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         let mut allocator = self.lock();
-        let size = BuddyAllocator::align_layout_size(layout);
-        let chunk = Chunk::new_at_address(VirtualAddress::from_raw_ptr(ptr), size);
-        allocator.dealloc(NonNull::new(chunk as *mut Chunk).unwrap())
+        let sz = BuddyAllocator::align_layout_size(layout);
+        // initialize chunk at address
+        let address = ptr as usize;
+        let chunk = BoxAt::new(address, Chunk::new(sz));
+        allocator.dealloc(chunk);
     }
 }

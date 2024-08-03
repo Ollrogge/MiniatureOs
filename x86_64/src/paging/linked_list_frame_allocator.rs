@@ -29,16 +29,14 @@ impl Node {
 }
 
 unsafe impl Linked<Links<Node>> for Node {
-    type Handle = Pin<BoxAt<Self>>;
+    type Handle = BoxAt<Self>;
 
     fn into_ptr(handle: Self::Handle) -> NonNull<Node> {
-        unsafe { NonNull::from(BoxAt::leak(Pin::into_inner_unchecked(handle))) }
-
-        //unsafe { NonNull::new_unchecked(Pin::into_inner_unchecked(handle) as *mut Node) }
+        NonNull::from(BoxAt::leak(handle))
     }
 
     unsafe fn from_ptr(ptr: NonNull<Node>) -> Self::Handle {
-        Pin::new_unchecked(BoxAt::from_raw(ptr.as_ptr()))
+        BoxAt::from_raw(ptr.as_ptr())
     }
 
     unsafe fn links(target: NonNull<Node>) -> NonNull<Links<Node>> {
@@ -89,7 +87,7 @@ impl LinkedListFrameAllocator {
                 .iter()
                 .for_each(|page| {
                     //serial_println!("Pushing to list: {:#x}", frame.start());
-                    let node = BoxAt::pin(
+                    let node = BoxAt::new(
                         usize::try_from(page.start_address().as_u64()).unwrap(),
                         Node::new(),
                     );
@@ -120,7 +118,7 @@ unsafe impl FrameAllocator<Size4KiB> for LinkedListFrameAllocator {
     }
 
     fn deallocate_frame(&mut self, frame: PhysicalFrame<Size4KiB>) {
-        let node = BoxAt::pin(
+        let node = BoxAt::new(
             usize::try_from(frame.start()).unwrap() + self.offset,
             Node::new(),
         );
