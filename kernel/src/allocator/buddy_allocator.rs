@@ -173,17 +173,12 @@ impl<'a> BuddyAllocator {
     // Due to the way the buddy allocator works, chunk >= layout.align() will
     // be properly aligned
     fn align_layout_size(layout: Layout) -> usize {
-        max(
-            layout.size().next_power_of_two(),
-            max(layout.align(), Self::min_size()),
-        )
-        .next_power_of_two()
+        max(layout.size(), max(layout.align(), Self::min_size())).next_power_of_two()
     }
 
     /// Alloc a power of two sized range of memory satisfying the layout requirement
     pub unsafe fn alloc(&mut self, layout: Layout) -> Option<BoxAt<Chunk>> {
         let size = Self::align_layout_size(layout);
-        assert_eq!(size % 2, 0);
         let class = size.trailing_zeros() as usize;
         // Find first non-empty size class
         for i in class..self.buddies.len() {

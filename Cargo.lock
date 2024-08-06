@@ -8,7 +8,7 @@ version = "0.1.0"
 dependencies = [
  "bootloader",
  "kernel",
- "test_kernel_unittests",
+ "test_kernel_allocators",
  "walkdir",
 ]
 
@@ -574,7 +574,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "test_kernel_unittests"
+name = "test_kernel_allocators"
 version = "0.1.0"
 dependencies = [
  "api",

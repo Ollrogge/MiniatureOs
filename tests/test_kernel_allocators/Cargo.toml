@@ -1,5 +1,5 @@
 [package]
-name = "test_kernel_unittests"
+name = "test_kernel_allocators"
 version = "0.1.0"
 edition = "2021"
 

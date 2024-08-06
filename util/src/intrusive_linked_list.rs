@@ -16,11 +16,12 @@ use core::{
     ptr::{self, NonNull},
 };
 
+/// Smart pointer similar to Box that can be initialized with a raw address.
+/// Used for implementing allocators
 pub struct BoxAt<T: ?Sized> {
     ptr: *mut T,
 }
 
-// Smart pointer pointing raw memory
 impl<T> BoxAt<T> {
     pub fn new(address: usize, value: T) -> Self {
         let ptr = address as *mut T;
@@ -81,6 +82,11 @@ impl<T: ?Sized> DerefMut for BoxAt<T> {
 
 type Link<T> = Option<NonNull<T>>;
 
+// Handle doesn't need to be a Pin<>. The linked list itself must make sure that
+// when returning references to elements which are currently in the linked list,
+// these references are Pinned. However for remove, pop_front or pop_back, the
+// ptr doesnt have to be pinned anymore since it is not part of the linked
+// list
 pub unsafe trait Linked<L> {
     type Handle;
     fn into_ptr(r: Self::Handle) -> NonNull<Self>;
