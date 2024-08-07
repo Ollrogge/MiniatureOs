@@ -27,7 +27,8 @@ use x86_64::{
 
 #[derive(PartialEq)]
 pub enum AllocationStrategy {
-    AllocateNow,
+    Now,
+    Lazy,
 }
 
 static MEMORY_MANAGER: Mutex<MemoryManager> = Mutex::new(MemoryManager::new());
@@ -129,17 +130,44 @@ impl MemoryManager {
     )
     */
 
+    // allocate frames for lazily allocated memory region
+    pub fn commit_pages_for_region(
+        &mut self,
+        region: &mut VirtualMemoryRegion<MemoryBackedVirtualMemoryObject>,
+    ) -> Result<(), KernelError> {
+        // todo: implement reserving mechanism such that we never have a case
+        // that a lazily allocated thread that is running is unable to allocate
+        // memory
+        let frames = self.try_allocate_frames(region.page_range().len())?;
+
+        let has_guard_page = region.typ() == RegionType::Stack;
+        for (frame, page) in zip(frames.iter(), region.page_range().iter().skip(1)) {
+            self.kernel_page_table
+                .as_mut()
+                .unwrap()
+                .map_to(frame.clone(), page, access_flags, &mut self.frame_allocator)?
+                .flush();
+        }
+
+        Ok(())
+    }
+
     // todo: lazily allocate and only back with frame on page fault
     pub fn allocate_kernel_region_with_size(
         &mut self,
         size: PageAlignedSize,
         name: String,
         typ: RegionType,
-        access_flags: PageTableEntryFlags,
+        mut access_flags: PageTableEntryFlags,
         strategy: AllocationStrategy,
     ) -> Result<VirtualMemoryRegion<MemoryBackedVirtualMemoryObject>, KernelError> {
-        let frames = self.try_allocate_frames(size.in_frames())?;
-        let obj = MemoryBackedVirtualMemoryObject::create_with_frames(frames, strategy)?;
+        let obj = match strategy {
+            AllocationStrategy::Now => {
+                let frames = self.try_allocate_frames(size.in_frames())?;
+                MemoryBackedVirtualMemoryObject::create(Some(frames))?
+            }
+            AllocationStrategy::Lazy => MemoryBackedVirtualMemoryObject::create(None)?,
+        };
 
         let has_guard_page = typ == RegionType::Stack;
 
@@ -172,13 +200,29 @@ impl MemoryManager {
 
         assert_eq!(page_range.len() - 1, obj.frames().len());
 
-        // skip guard page
-        for (frame, page) in zip(obj.frames(), page_range.iter().skip(1)) {
-            self.kernel_page_table
-                .as_mut()
-                .unwrap()
-                .map_to(frame.clone(), page, access_flags, &mut self.frame_allocator)?
-                .flush();
+        if strategy == AllocationStrategy::Now {
+            // skip guard page
+            for (frame, page) in zip(obj.frames(), page_range.iter().skip(1)) {
+                self.kernel_page_table
+                    .as_mut()
+                    .unwrap()
+                    .map_to(frame.clone(), page, access_flags, &mut self.frame_allocator)?
+                    .flush();
+            }
+        } else {
+            access_flags.remove(PageTableEntryFlags::PRESENT);
+            for page in page_range.iter().skip(1) {
+                self.kernel_page_table
+                    .as_mut()
+                    .unwrap()
+                    .map_to(
+                        PhysicalFrame::containing_address(PhysicalAddress::new(0)),
+                        page,
+                        access_flags,
+                        &mut self.frame_allocator,
+                    )?
+                    .flush();
+            }
         }
 
         Ok(VirtualMemoryRegion::new(page_range, name, obj, typ))

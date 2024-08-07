@@ -21,6 +21,22 @@ use x86_64::{
 pub enum AccessType {
     Read,
     ReadWrite,
+    Execute,
+    ReadWriteExecute,
+}
+
+impl Into<PageTableEntryFlags> for AccessType {
+    fn into(self) -> PageTableEntryFlags {
+        match self {
+            AccessType::Read => PageTableEntryFlags::NO_EXECUTE,
+            AccessType::ReadWrite => {
+                PageTableEntryFlags::WRITABLE | PageTableEntryFlags::NO_EXECUTE
+            }
+            // default readable and executable
+            AccessType::Execute => PageTableEntryFlags::NONE,
+            AccessType::ReadWriteExecute => PageTableEntryFlags::WRITABLE,
+        }
+    }
 }
 
 #[derive(PartialEq, Clone, Copy, Debug, Default)]
@@ -191,6 +207,10 @@ impl<U: VirtualMemoryObject> VirtualMemoryRegion<U> {
 
     pub fn typ(&self) -> RegionType {
         self.typ
+    }
+
+    pub fn page_range(&self) -> &PageRangeInclusive {
+        &self.range
     }
 }
 

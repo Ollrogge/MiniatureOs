@@ -200,7 +200,7 @@ fn try_create_stack_thread(
             PageTableEntryFlags::WRITABLE
                 | PageTableEntryFlags::PRESENT
                 | PageTableEntryFlags::NO_EXECUTE,
-            AllocationStrategy::AllocateNow,
+            AllocationStrategy::Now,
         )
 }
 
