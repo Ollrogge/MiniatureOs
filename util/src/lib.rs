@@ -6,6 +6,8 @@ pub mod mpsc_queue;
 pub mod mutex;
 #[cfg(feature = "kernel")]
 pub mod range_allocator;
+pub mod rwlock;
+mod semaphore;
 pub mod volatile;
 
 #[macro_export]
