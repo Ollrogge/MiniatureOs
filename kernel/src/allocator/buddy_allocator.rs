@@ -1,5 +1,13 @@
 //! This module implements a buddy frame allocator
 //!
+
+// Rusts idea of infallible allocations (why alloc can't fail)
+//
+// assume that they never fail, else you need to implement fallible allocation stuff which makes everything hard
+// Many collection methods may decide to allocate (push, insert, extend, entry, reserve, with_capacity, …) and those allocations may fail.
+// Early on in Rust’s history we made a policy decision not to expose this fact at the API level, preferring to abort. This is because most
+// developers aren’t prepared to handle it, or interested. Handling allocation failure haphazardly is likely to lead to many never-tested
+// code paths and therefore bugs. We call this approach infallible collection allocation, because the developer model is that allocations just don’t fail.
 extern crate alloc;
 use super::Locked;
 use crate::{println, serial_print, serial_println};

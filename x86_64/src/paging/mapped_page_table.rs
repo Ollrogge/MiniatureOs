@@ -166,12 +166,11 @@ impl<'a, P: PageTableFrameMapping> Mapper<Size4KiB> for MappedPageTable<'a, P> {
             return Err(UnmappingError::PageNotMapped);
         }
 
+        let frame = PhysicalFrame::containing_address(pte.address());
+
         pte.set_unused();
 
-        Ok((
-            PhysicalFrame::containing_address(pte.address()),
-            TlbFlusher::new(page),
-        ))
+        Ok((frame, TlbFlusher::new(page)))
     }
 }
 

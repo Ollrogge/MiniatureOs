@@ -93,6 +93,8 @@ impl Semaphore {
         }
     }
 
+    // Called when semaphore can be deallocated. No new permits can be issued.
+    // All waiters are notified
     pub fn close(&mut self) {
         self.closed.store(true, Ordering::Release);
         self.permits.store(self.max_permits, Release);

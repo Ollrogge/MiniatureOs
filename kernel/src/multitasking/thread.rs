@@ -4,16 +4,22 @@ use crate::{
     error::KernelError,
     memory::{
         address_space::AddressSpace,
-        region::VirtualMemoryRegion,
+        manager::MemoryManager,
+        region::{RegionType, VirtualMemoryRegion},
         virtual_memory_object::{MemoryBackedVirtualMemoryObject, VirtualMemoryObject},
     },
+    multitasking::process::ThreadId,
     serial_println,
 };
 use alloc::{boxed::Box, string::String, sync::Arc, vec, vec::Vec};
-use core::{pin::Pin, ptr::NonNull, slice};
+use core::{future::poll_fn, iter::zip, pin::Pin, ptr::NonNull, slice};
 use util::{intrusive_linked_list::Linked, mpsc_queue::Links, mutex::Mutex};
-use x86_64::register::RFlags;
-pub type ThreadEntryFunc = extern "C" fn() -> !;
+use x86_64::{
+    interrupts::PageFaultErrorCode, memory::VirtualAddress, paging::PageTableEntryFlags,
+    register::RFlags,
+};
+
+pub type ThreadEntryFunc = extern "C" fn();
 
 #[repr(C, packed)]
 #[derive(Default, Debug)]
@@ -53,12 +59,12 @@ pub enum ThreadPriority {
     High,
     Max,
 }
-use core::ptr;
 
 pub struct Thread {
+    id: ThreadId,
     name: String,
     pub process: Arc<Mutex<Process>>,
-    stack: VirtualMemoryRegion<MemoryBackedVirtualMemoryObject>,
+    mem_regions: Vec<VirtualMemoryRegion>,
     // Ensure that the address always remains the same. Else when e.g. we get a
     // reference to the value and then push the thread into a vector, the reference
     // to the last_stack ptr will become invalid.
@@ -66,6 +72,7 @@ pub struct Thread {
     last_stack_ptr: Pin<Box<u64>>,
     state: ThreadRunState,
     priority: ThreadPriority,
+    entry_func: ThreadEntryFunc,
 }
 
 pub extern "C" fn leave_thread() -> ! {
@@ -74,51 +81,64 @@ pub extern "C" fn leave_thread() -> ! {
 
 impl Thread {
     pub fn new<N>(
+        id: ThreadId,
         name: N,
+        // TODO: Rwlock
         process: Arc<Mutex<Process>>,
-        stack: VirtualMemoryRegion<MemoryBackedVirtualMemoryObject>,
-        entry_point: ThreadEntryFunc,
+        stack: VirtualMemoryRegion,
         priority: ThreadPriority,
+        entry: ThreadEntryFunc,
     ) -> Self
     where
         N: Into<String>,
     {
         let mut thread = Self {
+            id,
             name: name.into(),
             process,
-            stack,
+            mem_regions: vec![stack],
             // will be set when stack of thread is setup
             last_stack_ptr: Box::pin(0),
             state: ThreadRunState::Ready,
             priority,
+            entry_func: entry,
         };
-
-        unsafe { thread.setup_stack(entry_point) };
 
         thread
     }
 
+    // colonel thread = thread created from the code that was running on kernel
+    // entry and initialized everything
     pub fn colonel_thread<N>(
+        id: ThreadId,
         name: N,
         process: Arc<Mutex<Process>>,
-        stack: VirtualMemoryRegion<MemoryBackedVirtualMemoryObject>,
+        stack: VirtualMemoryRegion,
     ) -> Self
     where
         N: Into<String>,
     {
         Self {
+            id,
             name: name.into(),
             process,
-            stack,
+            mem_regions: vec![stack],
             last_stack_ptr: Box::pin(0),
             state: ThreadRunState::Ready,
             priority: ThreadPriority::Normal,
+            entry_func: unsafe { core::mem::transmute(0 as usize) },
         }
     }
 
-    unsafe fn setup_stack(&mut self, entry_point: ThreadEntryFunc) {
+    pub unsafe fn setup_stack(&mut self) {
+        let stack = self
+            .mem_regions
+            .iter()
+            .find(|x| x.typ() == RegionType::Stack)
+            .unwrap();
+
         let stack_slice: &mut [u8] =
-            slice::from_raw_parts_mut(self.stack.start().as_mut_ptr(), self.stack.size());
+            slice::from_raw_parts_mut(stack.start().as_mut_ptr(), stack.size());
 
         stack_slice.fill(0xff);
         let mut stack_writer = StackWriter::new(stack_slice);
@@ -132,13 +152,13 @@ impl Thread {
         serial_println!(
             "Thread stack_ptr: {:#x}, entry_point: {:#x}",
             rsp,
-            entry_point as u64
+            self.entry_func as u64
         );
 
         stack_writer.write_thread_register_state(ThreadRegisterState {
             rsp,
             rbp: rsp,
-            rip: entry_point as u64,
+            rip: self.entry_func as u64,
             rflags: (RFlags::IOPL_LOW | RFlags::INTERRUPT_FLAG).bits(),
             ..Default::default()
         });
@@ -168,6 +188,63 @@ impl Thread {
 
     pub fn finalize(&mut self) -> Result<(), KernelError> {
         Ok(())
+    }
+
+    pub fn handle_page_fault(
+        &mut self,
+        address: VirtualAddress,
+        error: PageFaultErrorCode,
+    ) -> Result<(), KernelError> {
+        let region = self.mem_regions.iter_mut().find(|x| x.contains(address));
+
+        if !error.is_non_present_fault() {
+            serial_println!("Unhandled page fault: {:?}", error);
+            return Err(KernelError::Other);
+        }
+
+        let mut process = self.process.lock();
+
+        if let Some(region) = region {
+            // TODO: check region backing type (file vs memory)?
+
+            // TODO: implement reserving mechanism such that we never encounter the case
+            // that a lazily allocated thread that is running is unable to allocate
+            // memory
+            let frames = MemoryManager::the()
+                .lock()
+                .try_allocate_frames(region.page_range().len())?;
+
+            let access_flags: PageTableEntryFlags =
+                Into::<PageTableEntryFlags>::into(region.access_flags())
+                    | PageTableEntryFlags::PRESENT;
+
+            // unmap pages to then remap them with frames
+            for page in region.page_range().iter().skip(1) {
+                let (_, flusher) = process.address_space().unmap(page)?;
+                flusher.ignore();
+            }
+            // skip guard page, index 0 since stack grows downwards => lowest address is end of stack
+            for (frame, page) in zip(frames.iter(), region.page_range().iter().skip(1)) {
+                unsafe {
+                    process
+                        .address_space()
+                        .map_to(frame.clone(), page, access_flags)?
+                        .flush();
+                }
+            }
+
+            drop(process);
+
+            if region.typ() == RegionType::Stack {
+                unsafe { self.setup_stack() };
+            }
+
+            Ok(())
+        } else {
+            // TODO: handle page faults for regions managed by the process
+            // for now we error out
+            Err(KernelError::Other)
+        }
     }
 }
 

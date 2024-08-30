@@ -17,6 +17,7 @@ panic = "abort"
 [build-dependencies]
 kernel = {path = "kernel", artifact = "bin", target = "x86_64-unknown-none"}
 test_kernel_allocators = {path = "tests/test_kernel_allocators", artifact = "bin", target= "x86_64-unknown-none"}
+test_kernel_multitasking = {path = "tests/test_kernel_multitasking", artifact = "bin", target= "x86_64-unknown-none"}
 bootloader={path="./bootloader"}
 walkdir="*"
 
@@ -30,7 +31,7 @@ members = [
     "bootloader/x86_64/bios/stage2",
     "bootloader/x86_64/bios/stage3",
     "bootloader/x86_64/bios/stage4",
-    "x86_64","tests/test_kernel_allocators","util",
+    "x86_64","tests/test_kernel_allocators","util", "tests/test_kernel_multitasking",
 ]
 
 [profile.mbr]

@@ -1,0 +1,9 @@
+[package]
+name = "test_kernel_multitasking"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+api = {path="../../bootloader/api"}
+x86_64= {path="../../x86_64"}
+kernel = {path="../../kernel"}

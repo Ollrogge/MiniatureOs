@@ -124,7 +124,7 @@ impl Scheduler {
         self.running_thread = Some(thread);
     }
 
-    pub(crate) unsafe fn the() -> &'static mut Scheduler {
+    pub unsafe fn the() -> &'static mut Scheduler {
         &mut *addr_of_mut!(SCHEDULER)
     }
 
@@ -163,7 +163,11 @@ impl Scheduler {
     }
 
     pub fn current_thread(&self) -> &Thread {
-        &self.running_thread.as_ref().unwrap()
+        self.running_thread.as_ref().unwrap()
+    }
+
+    pub fn current_thread_mut(&mut self) -> &mut Thread {
+        self.running_thread.as_mut().unwrap()
     }
 }
 

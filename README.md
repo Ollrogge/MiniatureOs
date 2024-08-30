@@ -12,6 +12,7 @@ rustup target add x86_64-unknown-none
 ```
 
 **Configure cargo**
+
 Add the following to `.cargo/config.toml`:
 ```toml
  [unstable]

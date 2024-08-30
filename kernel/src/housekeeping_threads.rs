@@ -1,7 +1,8 @@
 use crate::{
     error::KernelError,
+    memory::manager::AllocationStrategy,
     multitasking::{
-        process,
+        process::{self, ThreadId},
         scheduler::Scheduler,
         thread::{Thread, ThreadPriority},
     },
@@ -10,11 +11,16 @@ use crate::{
 use alloc::{string::String, vec::Vec};
 use x86_64::instructions::hlt;
 
-pub fn spawn_idle_thread() -> Result<(), KernelError> {
-    process::spawn_kernel_thread("Idle", idle_thread_func, ThreadPriority::Idle)
+pub fn spawn_idle_thread() -> Result<ThreadId, KernelError> {
+    process::spawn_kernel_thread(
+        "Idle",
+        idle_thread_func,
+        ThreadPriority::Idle,
+        AllocationStrategy::Now,
+    )
 }
 
-extern "C" fn idle_thread_func() -> ! {
+extern "C" fn idle_thread_func() {
     serial_println!("Idle thread enter");
     loop {
         hlt();
@@ -22,11 +28,16 @@ extern "C" fn idle_thread_func() -> ! {
     }
 }
 
-pub fn spawn_finalizer_thread() -> Result<(), KernelError> {
-    process::spawn_kernel_thread("Finalizer", finializer_thread_func, ThreadPriority::Low)
+pub fn spawn_finalizer_thread() -> Result<ThreadId, KernelError> {
+    process::spawn_kernel_thread(
+        "Finalizer",
+        finializer_thread_func,
+        ThreadPriority::Low,
+        AllocationStrategy::Now,
+    )
 }
 
-extern "C" fn finializer_thread_func() -> ! {
+extern "C" fn finializer_thread_func() {
     serial_println!("Finalizer thread enter");
     // Obtain exclusive comsumer right to the dying threads queue
     let consumer = unsafe {

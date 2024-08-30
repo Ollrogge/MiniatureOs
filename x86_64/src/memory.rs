@@ -796,12 +796,16 @@ impl<S: PageSize> PageRangeInclusive<S> {
         self.end_page.end_address()
     }
 
-    pub fn contains(&self, range: &PageRangeInclusive) -> bool {
+    pub fn contains_range(&self, range: &PageRangeInclusive) -> bool {
         self.start_address() <= range.start_address() && self.end_address() >= range.end_address()
     }
 
-    pub fn overlaps(&self, range: &PageRangeInclusive) -> bool {
+    pub fn overlaps_with_region(&self, range: &PageRangeInclusive) -> bool {
         !(self.end_address() < range.start_address() || self.start_address() > range.end_address())
+    }
+
+    pub fn contains_address(&self, addr: VirtualAddress) -> bool {
+        self.start_address() >= addr && self.end_address() <= addr
     }
 
     pub fn size(&self) -> usize {

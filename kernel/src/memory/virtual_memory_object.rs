@@ -4,7 +4,7 @@ use crate::{
     multitasking::process::Process,
     serial_println,
 };
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 use core::ops::Drop;
 use x86_64::memory::{PageAlignedSize, PageRangeInclusive, PageSize, PhysicalFrame, Size4KiB};
 pub trait VirtualMemoryObject {
@@ -23,15 +23,23 @@ impl MemoryBackedVirtualMemoryObject {
         Self { frames }
     }
     // ignore strategy for now. we always allocate frame immediately
-    pub fn create_with_frames(
-        frames: Vec<PhysicalFrame>,
-        _: AllocationStrategy,
+    pub fn create(
+        frames: Option<Vec<PhysicalFrame>>,
     ) -> Result<MemoryBackedVirtualMemoryObject, MemoryError> {
-        Ok(Self { frames })
+        let obj = match frames {
+            Some(frames) => Self { frames },
+            None => Self { frames: vec![] },
+        };
+
+        Ok(obj)
     }
 
     pub fn frames(&self) -> &Vec<PhysicalFrame> {
         &self.frames
+    }
+
+    pub fn add_frames(&mut self, mut frames: Vec<PhysicalFrame>) {
+        self.frames.append(&mut frames);
     }
 }
 

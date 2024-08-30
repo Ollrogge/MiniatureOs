@@ -9,6 +9,7 @@ dependencies = [
  "bootloader",
  "kernel",
  "test_kernel_allocators",
+ "test_kernel_multitasking",
  "walkdir",
 ]
 
@@ -575,6 +576,15 @@ dependencies = [
 
 [[package]]
 name = "test_kernel_allocators"
+version = "0.1.0"
+dependencies = [
+ "api",
+ "kernel",
+ "x86_64",
+]
+
+[[package]]
+name = "test_kernel_multitasking"
 version = "0.1.0"
 dependencies = [
  "api",

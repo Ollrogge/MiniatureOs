@@ -1,4 +1,8 @@
-use crate::{multitasking::scheduler::schedule, print, println, serial_print, serial_println};
+use crate::{
+    memory::manager::MemoryManager,
+    multitasking::scheduler::{schedule, Scheduler},
+    print, println, serial_print, serial_println,
+};
 use bitflags::bitflags;
 use core::{
     arch::asm,
@@ -196,8 +200,16 @@ extern "C" fn page_fault_handler(frame: &ExceptionStackFrame, error_code: u64) {
         error,
         frame
     );
-    // TODO: handle
-    loop {}
+
+    let res = unsafe {
+        Scheduler::the()
+            .current_thread_mut()
+            .handle_page_fault(address, error)
+    };
+
+    if res.is_err() {
+        loop {}
+    }
 }
 
 extern "C" fn alignment_check_handler(frame: &ExceptionStackFrame, error_code: u64) -> ! {

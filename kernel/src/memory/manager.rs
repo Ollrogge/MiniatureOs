@@ -1,18 +1,25 @@
 // wraps the frame allocator
 // stores the kernel page directory info
 // places stuff in virtual memory
+extern crate alloc;
 
 use super::{
-    region::{self, AccessType, PlacingStrategy, RegionTree, RegionType, VirtualMemoryRegion},
+    region::{self, AccessFlags, PlacingStrategy, RegionTree, RegionType, VirtualMemoryRegion},
     virtual_memory_object::{MemoryBackedVirtualMemoryObject, VirtualMemoryObject},
     MemoryError,
 };
-use crate::{allocator::init_heap, error::KernelError, serial_println};
-use alloc::{string::String, vec::Vec};
+use crate::{
+    allocator::init_heap,
+    error::KernelError,
+    multitasking::{process::Process, scheduler::Scheduler},
+    serial_println,
+};
+use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use api::BootInfo;
 use core::iter::zip;
 use util::mutex::{Mutex, MutexGuard};
 use x86_64::{
+    interrupts::PageFaultErrorCode,
     memory::{
         FrameAllocator, Page, PageAlignedSize, PageRangeInclusive, PageSize, PhysicalAddress,
         PhysicalFrame, Size4KiB, VirtualAddress, VirtualRange,
@@ -25,9 +32,10 @@ use x86_64::{
     register::Cr3,
 };
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Copy)]
 pub enum AllocationStrategy {
-    AllocateNow,
+    Now,
+    Lazy,
 }
 
 static MEMORY_MANAGER: Mutex<MemoryManager> = Mutex::new(MemoryManager::new());
@@ -130,16 +138,22 @@ impl MemoryManager {
     */
 
     // todo: lazily allocate and only back with frame on page fault
-    pub fn allocate_kernel_region_with_size(
+    pub fn allocate_region_with_size(
         &mut self,
+        process: Arc<Mutex<Process>>,
         size: PageAlignedSize,
         name: String,
         typ: RegionType,
-        access_flags: PageTableEntryFlags,
+        mut access_flags: PageTableEntryFlags,
         strategy: AllocationStrategy,
-    ) -> Result<VirtualMemoryRegion<MemoryBackedVirtualMemoryObject>, KernelError> {
-        let frames = self.try_allocate_frames(size.in_frames())?;
-        let obj = MemoryBackedVirtualMemoryObject::create_with_frames(frames, strategy)?;
+    ) -> Result<VirtualMemoryRegion, KernelError> {
+        let obj = match strategy {
+            AllocationStrategy::Now => {
+                let frames = self.try_allocate_frames(size.in_frames())?;
+                MemoryBackedVirtualMemoryObject::create(Some(frames))?
+            }
+            AllocationStrategy::Lazy => MemoryBackedVirtualMemoryObject::create(None)?,
+        };
 
         let has_guard_page = typ == RegionType::Stack;
 
@@ -170,18 +184,42 @@ impl MemoryManager {
                 .ignore();
         }
 
-        assert_eq!(page_range.len() - 1, obj.frames().len());
-
-        // skip guard page
-        for (frame, page) in zip(obj.frames(), page_range.iter().skip(1)) {
-            self.kernel_page_table
-                .as_mut()
-                .unwrap()
-                .map_to(frame.clone(), page, access_flags, &mut self.frame_allocator)?
-                .flush();
+        if strategy == AllocationStrategy::Now {
+            assert_eq!(page_range.len() - 1, obj.frames().len());
+            // skip guard page, index 0 since stack grows downwards => lowest address is end of stack
+            for (frame, page) in zip(obj.frames(), page_range.iter().skip(1)) {
+                unsafe {
+                    process
+                        .lock()
+                        .address_space()
+                        .map_to(frame.clone(), page, access_flags)?
+                        .flush();
+                }
+            }
+        } else {
+            access_flags.remove(PageTableEntryFlags::PRESENT);
+            for page in page_range.iter().skip(1) {
+                unsafe {
+                    process
+                        .lock()
+                        .address_space()
+                        .map_to(
+                            PhysicalFrame::containing_address(PhysicalAddress::new(0)),
+                            page,
+                            access_flags,
+                        )?
+                        .flush();
+                }
+            }
         }
 
-        Ok(VirtualMemoryRegion::new(page_range, name, obj, typ))
+        Ok(VirtualMemoryRegion::new(
+            page_range,
+            name,
+            Box::new(obj),
+            typ,
+            access_flags.into(),
+        ))
     }
 
     pub fn deallocate_frames(&mut self, frames: &Vec<PhysicalFrame>) {

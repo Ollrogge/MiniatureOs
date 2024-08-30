@@ -7,15 +7,18 @@ use crate::{
     memory::{
         address_space::AddressSpace,
         manager::{AllocationStrategy, MemoryManager},
-        region::{RegionType, VirtualMemoryRegion},
+        region::{AccessFlags, RegionType, VirtualMemoryRegion},
         virtual_memory_object::MemoryBackedVirtualMemoryObject,
     },
     serial_println, GlobalData,
 };
-use alloc::{collections::BTreeMap, format, string::String, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, collections::BTreeMap, format, string::String, sync::Arc, vec::Vec};
 use api::BootInfo;
 use core::sync::atomic::{AtomicU64, Ordering::Relaxed};
-use util::mutex::{Mutex, MutexGuard};
+use util::{
+    hashmap::HashMap,
+    mutex::{Mutex, MutexGuard},
+};
 use x86_64::{
     memory::{PageAlignedSize, KIB},
     paging::{PageTableEntryFlags, Translator},
@@ -115,10 +118,14 @@ impl ProcessId {
     }
 }
 
+pub type ThreadId = usize;
+
 pub struct Process {
     id: ProcessId,
     name: String,
     address_space: AddressSpace,
+    memory_regions: HashMap<ThreadId, Vec<VirtualMemoryRegion>>,
+    cur_thread_id: ThreadId,
 }
 
 impl Process {
@@ -130,6 +137,8 @@ impl Process {
             id: ProcessId::new(),
             name: name.into(),
             address_space: AddressSpace::new(cr3, GlobalData::the().physical_memory_offset()),
+            memory_regions: HashMap::new(),
+            cur_thread_id: 0,
         }
     }
 
@@ -141,9 +150,14 @@ impl Process {
         unsafe { Scheduler::the().current_thread().process.clone() }
     }
 
-    // TODO: rwlock
     pub fn address_space(&mut self) -> &mut AddressSpace {
         &mut self.address_space
+    }
+
+    pub fn next_thread_id(&mut self) -> ThreadId {
+        let ret = self.cur_thread_id;
+        self.cur_thread_id += 1;
+        ret
     }
 }
 
@@ -177,11 +191,14 @@ pub fn init(boot_info: &'static BootInfo) -> Result<(), KernelError> {
     let stack = VirtualMemoryRegion::new(
         boot_info.kernel_stack.clone(),
         stack_name,
-        obj,
+        Box::new(obj),
         RegionType::Stack,
+        AccessFlags::ReadWrite,
     );
 
-    let thread = Thread::colonel_thread("colonel_thread", process, stack);
+    let next_id = process.lock().next_thread_id();
+
+    let thread = Thread::colonel_thread(next_id, "colonel_thread", process, stack);
 
     Scheduler::init(thread);
 
@@ -189,35 +206,46 @@ pub fn init(boot_info: &'static BootInfo) -> Result<(), KernelError> {
 }
 
 fn try_create_stack_thread(
+    process: Arc<Mutex<Process>>,
     name: String,
-) -> Result<VirtualMemoryRegion<MemoryBackedVirtualMemoryObject>, KernelError> {
-    MemoryManager::the()
-        .lock()
-        .allocate_kernel_region_with_size(
-            DEFAULT_STACK_SIZE,
-            name,
-            RegionType::Stack,
-            PageTableEntryFlags::WRITABLE
-                | PageTableEntryFlags::PRESENT
-                | PageTableEntryFlags::NO_EXECUTE,
-            AllocationStrategy::AllocateNow,
-        )
+    allocation_strategy: AllocationStrategy,
+) -> Result<VirtualMemoryRegion, KernelError> {
+    MemoryManager::the().lock().allocate_region_with_size(
+        process,
+        DEFAULT_STACK_SIZE,
+        name,
+        RegionType::Stack,
+        PageTableEntryFlags::WRITABLE
+            | PageTableEntryFlags::PRESENT
+            | PageTableEntryFlags::NO_EXECUTE,
+        allocation_strategy,
+    )
 }
 
 pub fn spawn_kernel_thread<N>(
     name: N,
     func: ThreadEntryFunc,
     priority: ThreadPriority,
-) -> Result<(), KernelError>
+    allocation_strategy: AllocationStrategy,
+) -> Result<ThreadId, KernelError>
 where
     N: Into<String>,
 {
     let name = name.into();
     let cur_process = Process::current();
-    let thread_stack = try_create_stack_thread(format!("{}_stack", &name))?;
-    let thread = Thread::new(name, cur_process, thread_stack, func, priority);
+    let thread_stack = try_create_stack_thread(
+        cur_process.clone(),
+        format!("{}_stack", &name),
+        allocation_strategy,
+    )?;
+    let tid = cur_process.lock().next_thread_id();
+    let mut thread = Thread::new(tid, name, cur_process, thread_stack, priority, func);
+
+    if allocation_strategy == AllocationStrategy::Now {
+        unsafe { thread.setup_stack() };
+    }
 
     unsafe { Scheduler::the().add_thread(thread) };
 
-    Ok(())
+    Ok(tid)
 }

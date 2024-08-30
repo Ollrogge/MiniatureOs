@@ -7,8 +7,8 @@ use crate::{
     error::KernelError, memory::manager::FrameAllocatorDelegate, multitasking::process::Process,
     serial_println,
 };
-use alloc::{collections::BTreeMap, string::String, vec::Vec};
-use core::{borrow::Borrow, default, ops::Drop};
+use alloc::{boxed::Box, collections::BTreeMap, string::String, vec::Vec};
+use core::{borrow::Borrow, default, marker::PhantomData, ops::Drop};
 use util::range_allocator::{self, RangeAllocator};
 use x86_64::{
     memory::{
@@ -18,9 +18,41 @@ use x86_64::{
     paging::PageTableEntryFlags,
 };
 
-pub enum AccessType {
+#[derive(Default, Clone, Copy)]
+pub enum AccessFlags {
+    #[default]
     Read,
     ReadWrite,
+    Execute,
+    ReadWriteExecute,
+}
+
+impl Into<PageTableEntryFlags> for AccessFlags {
+    fn into(self) -> PageTableEntryFlags {
+        match self {
+            AccessFlags::Read => PageTableEntryFlags::NO_EXECUTE,
+            AccessFlags::ReadWrite => {
+                PageTableEntryFlags::WRITABLE | PageTableEntryFlags::NO_EXECUTE
+            }
+            // default readable and executable
+            AccessFlags::Execute => PageTableEntryFlags::NONE,
+            AccessFlags::ReadWriteExecute => PageTableEntryFlags::WRITABLE,
+        }
+    }
+}
+
+impl From<PageTableEntryFlags> for AccessFlags {
+    fn from(val: PageTableEntryFlags) -> Self {
+        if val.contains(PageTableEntryFlags::WRITABLE | PageTableEntryFlags::NO_EXECUTE) {
+            AccessFlags::ReadWrite
+        } else if val.contains(PageTableEntryFlags::WRITABLE) {
+            AccessFlags::ReadWriteExecute
+        } else if val.contains(PageTableEntryFlags::NO_EXECUTE) {
+            AccessFlags::Read
+        } else {
+            AccessFlags::Execute
+        }
+    }
 }
 
 #[derive(PartialEq, Clone, Copy, Debug, Default)]
@@ -148,16 +180,22 @@ impl RegionTree {
 
 //Region with a base address, size and permissions
 // Only knows to which VMObject it refers to, no physical frame
-#[derive(Default)]
-pub struct VirtualMemoryRegion<U: VirtualMemoryObject> {
+pub struct VirtualMemoryRegion {
     range: PageRangeInclusive,
     name: String,
-    obj: U,
+    obj: Box<dyn VirtualMemoryObject>,
     typ: RegionType,
+    access_flags: AccessFlags,
 }
 
-impl<U: VirtualMemoryObject> VirtualMemoryRegion<U> {
-    pub fn new<N>(range: PageRangeInclusive, name: N, obj: U, typ: RegionType) -> Self
+impl VirtualMemoryRegion {
+    pub fn new<N>(
+        range: PageRangeInclusive,
+        name: N,
+        obj: Box<dyn VirtualMemoryObject>,
+        typ: RegionType,
+        access_flags: AccessFlags,
+    ) -> Self
     where
         N: Into<String>,
     {
@@ -166,6 +204,7 @@ impl<U: VirtualMemoryObject> VirtualMemoryRegion<U> {
             name: name.into(),
             obj,
             typ,
+            access_flags,
         }
     }
 
@@ -192,9 +231,31 @@ impl<U: VirtualMemoryObject> VirtualMemoryRegion<U> {
     pub fn typ(&self) -> RegionType {
         self.typ
     }
+
+    pub fn page_range(&self) -> &PageRangeInclusive {
+        &self.range
+    }
+
+    pub fn contains(&self, addr: VirtualAddress) -> bool {
+        self.range.contains_address(addr)
+    }
+
+    pub fn access_flags(&self) -> AccessFlags {
+        self.access_flags
+    }
 }
 
-impl<U: VirtualMemoryObject> Drop for VirtualMemoryRegion<U> {
+// Something can safely be Send unless it shares mutable state with something
+// else without enforcing exclusive access to it.
+unsafe impl Send for VirtualMemoryRegion {}
+// Sync we have to enforce that you can't write to something stored in a &Carton
+// while that same something could be read or written to from another &Carton.
+// Since you need an &mut Carton to write to the pointer, and the borrow checker
+// enforces that mutable references must be exclusive, there are no soundness
+// issues making Carton sync either.
+unsafe impl Sync for VirtualMemoryRegion {}
+
+impl Drop for VirtualMemoryRegion {
     fn drop(&mut self) {
         serial_println!("Drop VirtualMemoryRegion: {:?} {:?}", self.typ, self.name);
         MemoryManager::the()

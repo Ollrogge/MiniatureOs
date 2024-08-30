@@ -1,3 +1,9 @@
+// separate timer circuit
+//  can cause inefficiencies / timming issues in multiprocessor systems
+// lower precision and frequency range
+// good as a starter
+// https://wiki.osdev.org/Programmable_Interval_Timer#Uses_for_the_Timer_IRQ
+//
 use bitflags::bitflags;
 use x86_64::port::{io_wait, Port};
 

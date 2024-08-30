@@ -37,6 +37,7 @@ fn main() {
                 .unwrap()
         })
     {
+        //panic!("Vars: {:?}", std::env::vars());
         let test_kernel_path = PathBuf::from(
             std::env::var_os(format!(
                 "CARGO_BIN_FILE_{}_{}",

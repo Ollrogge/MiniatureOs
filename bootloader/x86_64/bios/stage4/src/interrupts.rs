@@ -60,6 +60,7 @@ extern "C" fn page_fault_handler(frame: &ExceptionStackFrame, error_code: u64) {
         "Page fault in bootloader: \n error_code: {:?} \n exception frame: {:?}",
         error, frame
     );
+
     // TODO: handle
     loop {}
 }

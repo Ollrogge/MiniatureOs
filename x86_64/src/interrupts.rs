@@ -1,5 +1,5 @@
 use crate::register::{RFlags, RFlagsReg};
-use bitflags::bitflags;
+use bitflags::{bitflags, Flags};
 use core::{arch::asm, fmt};
 
 /// Disables CPU interrupts.
@@ -124,6 +124,16 @@ bitflags! {
         const USER_MODE = 1 << 2;
         const MALFORMED_TABLE = 1 << 3;
         const INSTRUCTION_FETCH = 1 << 4;
+    }
+}
+
+impl PageFaultErrorCode {
+    pub fn is_non_present_fault(&self) -> bool {
+        self.bits() & PageFaultErrorCode::PROTECTION_VIOLATION.bits() == 0
+    }
+
+    pub fn is_write_fault(&self) -> bool {
+        self.bits() & PageFaultErrorCode::WRITE_VIOLATION.bits() != 0
     }
 }
 
