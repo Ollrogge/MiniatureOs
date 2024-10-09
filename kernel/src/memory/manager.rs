@@ -19,7 +19,6 @@ use api::BootInfo;
 use core::iter::zip;
 use util::mutex::{Mutex, MutexGuard};
 use x86_64::{
-    interrupts::PageFaultErrorCode,
     memory::{
         FrameAllocator, Page, PageAlignedSize, PageRangeInclusive, PageSize, PhysicalAddress,
         PhysicalFrame, Size4KiB, VirtualAddress, VirtualRange,

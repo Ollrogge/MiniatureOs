@@ -9,20 +9,6 @@ use core::{
 
 pub struct FNV1aHasher(u64);
 
-/*
-uint64_t
- fnFNV (const uint8_t* pBuffer, const uint8_t* const pBufferEnd)
- {
-     const uint64_t  MagicPrime = 0x00000100000001b3;
-     uint64_t        Hash       = 0xcbf29ce484222325;
-
-     for ( ; pBuffer < pBufferEnd; pBuffer++)
-         Hash = (Hash ^ *pBuffer) * MagicPrime;   // bitweises XOR und dann Multiplikation
-
-     return Hash;
- }
-*/
-
 impl FNV1aHasher {
     pub(super) const INITIAL_STATE: u64 = 0xcbf2_9ce4_8422_2325;
     const PRIME: u64 = 0x0100_0000_01b3;
