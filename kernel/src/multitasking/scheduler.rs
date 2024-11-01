@@ -3,16 +3,15 @@ use super::{
     thread::{Thread, ThreadRunState},
 };
 use crate::serial_println;
-use alloc::{boxed::Box, collections::VecDeque, string::String, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, collections::VecDeque};
 use core::{
     arch::asm,
-    cell::UnsafeCell,
+    arch::naked_asm,
     ops::{Deref, DerefMut},
     pin::Pin,
     ptr::{self, addr_of_mut, NonNull},
     sync::atomic::{AtomicBool, Ordering},
 };
-use lazy_static::lazy_static;
 use util::{
     intrusive_linked_list::Linked,
     mpsc_queue::{Links, MpscQueue},
@@ -186,7 +185,7 @@ macro_rules! restore_state {
 
 #[naked]
 unsafe extern "C" fn task_switch(old_rsp: *mut u64, new_rsp: u64, old_cr3: u64, new_cr3: u64) {
-    asm!(
+    naked_asm!(
         save_state!(),
         "mov [rdi], rsp",
         "mov rsp, rsi",
@@ -196,6 +195,5 @@ unsafe extern "C" fn task_switch(old_rsp: *mut u64, new_rsp: u64, old_cr3: u64, 
         "2:",
         restore_state!(),
         "ret",
-        options(noreturn)
     )
 }

@@ -1,13 +1,11 @@
 use crate::{
-    memory::manager::MemoryManager,
     multitasking::scheduler::{schedule, Scheduler},
-    print, println, serial_print, serial_println,
+    serial_println,
 };
-use bitflags::bitflags;
 use core::{
-    arch::asm,
     fmt::{self, Debug},
     ptr::addr_of,
+    arch::naked_asm
 };
 use lazy_static::lazy_static;
 use util::mutex::Mutex;
@@ -15,14 +13,13 @@ use x86_64::{
     gdt::{GlobalDescriptorTable, SegmentDescriptor, SegmentSelector},
     handler_with_error_code, handler_without_error_code,
     idt::InterruptDescriptorTable,
-    instructions::int3,
     interrupts::{self, ExceptionStackFrame, PageFaultErrorCode},
     memory::{Address, PageSize, Size4KiB, VirtualAddress},
-    pop_scratch_registers,
-    port::Port,
-    push_scratch_registers,
     register::{Cr2, CS, DS, ES, SS},
     tss::{TaskStateSegment, DOUBLE_FAULT_IST_IDX},
+    // required by the set_handler_function macro
+    push_scratch_registers,
+    pop_scratch_registers
 };
 
 mod hardware;

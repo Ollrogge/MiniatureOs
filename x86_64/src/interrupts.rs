@@ -1,6 +1,6 @@
 use crate::register::{RFlags, RFlagsReg};
 use bitflags::{bitflags, Flags};
-use core::{arch::asm, fmt};
+use core::{arch::naked_asm, arch::asm, fmt};
 
 /// Disables CPU interrupts.
 ///
@@ -73,7 +73,7 @@ macro_rules! handler_with_error_code {
         #[naked]
         extern "C" fn wrapper() -> ! {
             unsafe {
-                asm!(
+                naked_asm!(
                     push_scratch_registers!(),
                     "mov rsi, [rsp + 9*8]", // load error code (cant use pop before saving scratch registers since this would corrupt rsi)
                     "mov rdi, rsp",
@@ -85,7 +85,6 @@ macro_rules! handler_with_error_code {
                     "add rsp, 8", // pop error code
                     "iretq",
                     sym $name,
-                    options(noreturn)
                 )
             }
         }
@@ -100,7 +99,7 @@ macro_rules! handler_without_error_code {
         #[naked]
         extern "C" fn wrapper() -> ! {
             unsafe {
-                asm!(
+                naked_asm!(
                     push_scratch_registers!(),
                     "mov rdi, rsp",
                     "add rdi, 9*8",
@@ -108,7 +107,6 @@ macro_rules! handler_without_error_code {
                     pop_scratch_registers!(),
                     "iretq",
                     sym $name,
-                    options(noreturn),
                 )
             }
         }

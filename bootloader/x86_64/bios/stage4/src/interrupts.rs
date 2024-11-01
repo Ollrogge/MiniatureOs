@@ -1,6 +1,7 @@
 // Populate IDT for easier debugging of crashes in the bootloader
 use common::println;
 use core::arch::asm;
+use core::arch::naked_asm;
 use lazy_static::lazy_static;
 use x86_64::{
     handler_with_error_code, handler_without_error_code,
