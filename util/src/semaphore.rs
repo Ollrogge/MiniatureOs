@@ -29,6 +29,7 @@ impl Display for SemaphoreError {
     }
 }
 
+#[derive(Debug)]
 pub struct Permit<'sem> {
     permits: usize,
     semaphore: &'sem Semaphore,
@@ -40,6 +41,8 @@ impl<'sem> Drop for Permit<'sem> {
     }
 }
 
+
+#[derive(Debug)]
 pub struct Semaphore {
     permits: AtomicUsize,
     closed: AtomicBool,
@@ -191,11 +194,10 @@ mod tests {
 
         let sem_clone = sem.clone();
         let handle = thread::spawn(move || {
-            sem_clone.acquire(1).unwrap();
-
+            // need to assign to prevent permit from being dropped immediately
+            let p = sem_clone.acquire(1).unwrap();
             thread::sleep(Duration::from_secs(1));
         });
-
         // make sure thread has spawned
         thread::sleep(Duration::from_millis(100));
 

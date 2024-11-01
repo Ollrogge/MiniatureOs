@@ -10,6 +10,7 @@ pub mod ringbuffer;
 pub mod rwlock;
 mod semaphore;
 pub mod volatile;
+pub mod elf_loader;
 
 #[macro_export]
 macro_rules! const_assert {

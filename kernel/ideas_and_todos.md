@@ -13,6 +13,9 @@
 + temporary root file system which the OS uses as a filesystem containing stuff necessary for it to boot
 + solution to chicken-or-egg problem at boot time: the kernel needs to load its modules from disk, but these modules include the driver that normally allows the kernel to access that disk
 
+### Util
++ create a separate crate for every utility ?
+
 ### Timer
 + APIC timer
     + local timer hardwired to each cpu core
