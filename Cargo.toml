@@ -31,7 +31,7 @@ members = [
     "bootloader/x86_64/bios/stage2",
     "bootloader/x86_64/bios/stage3",
     "bootloader/x86_64/bios/stage4",
-    "x86_64","tests/test_kernel_allocators","util", "tests/test_kernel_multitasking",
+    "x86_64","tests/test_kernel_allocators","util", "tests/test_kernel_multitasking", "num_enum",
 ]
 
 [profile.mbr]

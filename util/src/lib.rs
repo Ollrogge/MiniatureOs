@@ -1,4 +1,5 @@
 #![no_std]
+pub mod elf_loader;
 #[cfg(feature = "kernel")]
 pub mod hashmap;
 pub mod intrusive_linked_list;
@@ -10,7 +11,6 @@ pub mod ringbuffer;
 pub mod rwlock;
 mod semaphore;
 pub mod volatile;
-pub mod elf_loader;
 
 #[macro_export]
 macro_rules! const_assert {
