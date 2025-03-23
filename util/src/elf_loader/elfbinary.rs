@@ -1,19 +1,46 @@
-// ELF loader for x86_64 ELF files
+// ELF loader for x86_64 ELF files that is no_std compatible
+// cheatsheet: https://gist.github.com/x0nu11byt3/bcb35c3de461e5fb66173071a2379779
 
-extern crate alloc;
 use crate::const_assert;
-use alloc::{
-    format,
-    string::{String, ToString},
-    vec::Vec,
-};
 use core::{fmt, fmt::Display};
 
 #[derive(Debug)]
+enum InvalidElfHeader {
+    InvalidMagic,
+    InvalidClass,
+    InvalidEndianess,
+    InvalidVersion,
+    InvalidAbi,
+    InvalidElfType,
+    InvalidMachine,
+}
+
+#[derive(Debug)]
+enum InvalidProgramHeader {
+    UnknownSegmentFlags,
+    InvalidSegmentType,
+    InvalidAlignment,
+    InvalidHeaderOffset,
+}
+
+#[derive(Debug)]
+enum InvalidSectionHeader {
+    InvalidHeaderType,
+    InvalidSectionFlags,
+    InvalidHeaderOffset,
+}
+
+#[derive(Debug)]
+enum InvalidRelocationType {
+    InvalidType,
+}
+
+#[derive(Debug)]
 pub enum ElfError {
-    InvalidElfHeader(String),
-    InvalidProgramHeader(String),
-    InvalidSectionHeader(String),
+    InvalidElfHeader(InvalidElfHeader),
+    InvalidProgramHeader(InvalidProgramHeader),
+    InvalidSectionHeader(InvalidSectionHeader),
+    InvalidRelocationType(InvalidRelocationType),
     Other,
 }
 
@@ -118,31 +145,31 @@ impl ElfHeader {
 
         validate!(
             raw[0..4] == *Self::ELF_MAGIC.as_bytes(),
-            ElfError::InvalidElfHeader("Invalid Magic".to_string())
+            ElfError::InvalidElfHeader(InvalidElfHeader::InvalidMagic)
         );
         validate!(
             raw[4] == ElfClass::Elf64 as u8,
-            ElfError::InvalidElfHeader("Incorrect elfclass".to_string())
+            ElfError::InvalidElfHeader(InvalidElfHeader::InvalidElfType)
         );
         validate!(
             raw[5] == Endianness::Little as u8,
-            ElfError::InvalidElfHeader("Wrong endianess".to_string())
+            ElfError::InvalidElfHeader(InvalidElfHeader::InvalidEndianess)
         );
         validate!(
             raw[6] == 0x1,
-            ElfError::InvalidElfHeader("Incorrect ELF version".to_string())
+            ElfError::InvalidElfHeader(InvalidElfHeader::InvalidVersion)
         );
         validate!(
             raw[7] == Abi::SysV as u8,
-            ElfError::InvalidElfHeader("Incorrect ABI".to_string())
+            ElfError::InvalidElfHeader(InvalidElfHeader::InvalidAbi)
         );
         validate!(
             ElfType::try_from(u16::from_le_bytes([raw[0x10], raw[0x11]])).is_ok(),
-            ElfError::InvalidElfHeader("Invalid elf type".to_string())
+            ElfError::InvalidElfHeader(InvalidElfHeader::InvalidElfType)
         );
         validate!(
             u16::from_le_bytes([raw[0x12], raw[0x13]]) == Machine::X86_64 as u16,
-            ElfError::InvalidElfHeader("Invalid machine".to_string())
+            ElfError::InvalidElfHeader(InvalidElfHeader::InvalidMachine)
         );
 
         val64.copy_from_slice(&raw[0x18..0x20]);
@@ -180,35 +207,84 @@ impl ElfHeader {
             shstrndx,
         })
     }
+
+    pub fn program_headers<'a>(
+        &self,
+        raw: &'a [u8],
+    ) -> Result<impl Iterator<Item = ProgramHeader> + 'a, ElfError> {
+        let phnum = self.phnum;
+        let phoff = self.phoff;
+        let phentsize = self.phentsize;
+
+        for i in 0..phnum as u64 {
+            let offset = (phoff + i * phentsize as u64) as usize;
+            if offset + phentsize as usize > raw.len() {
+                return Err(ElfError::InvalidSectionHeader(
+                    InvalidSectionHeader::InvalidHeaderOffset,
+                ));
+            }
+            ProgramHeader::new(&raw[offset..])?;
+        }
+
+        Ok((0..phnum as u64).map(move |i| {
+            let offset = (phoff + i * phentsize as u64) as usize;
+            // We already validated these, so unwrap is safe here
+            ProgramHeader::new(&raw[offset..]).unwrap()
+        }))
+    }
+
+    pub fn section_headers<'a>(
+        &self,
+        raw: &'a [u8],
+    ) -> Result<impl Iterator<Item = SectionHeader> + 'a, ElfError> {
+        let shnum = self.shnum;
+        let shoff = self.shoff;
+        let shentsize = self.shentsize;
+
+        for i in 0..shnum as u64 {
+            let offset = (shoff + i * shentsize as u64) as usize;
+            if offset + shentsize as usize > raw.len() {
+                return Err(ElfError::InvalidSectionHeader(
+                    InvalidSectionHeader::InvalidHeaderOffset,
+                ));
+            }
+            SectionHeader::new(&raw[offset..])?;
+        }
+
+        Ok((0..shnum as u64).map(move |i| {
+            let offset = (shoff + i * shentsize as u64) as usize;
+            // We already validated these, so unwrap is safe here
+            SectionHeader::new(&raw[offset..]).unwrap()
+        }))
+    }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 #[repr(u32)]
 enum SegmentType {
-    NULL,
-    LOAD,
-    DYNAMIC,
-    INTERP,
-    SHLIB,
-    PHDR,
-    TLS,
+    Null,
+    Load,
+    Dynamic,
+    Interp,
+    Shlib,
+    Phdr,
+    Tls,
 }
 
 impl TryFrom<u32> for SegmentType {
     type Error = ElfError;
     fn try_from(value: u32) -> Result<Self, Self::Error> {
         match value {
-            0 => Ok(SegmentType::NULL),
-            1 => Ok(SegmentType::LOAD),
-            2 => Ok(SegmentType::DYNAMIC),
-            3 => Ok(SegmentType::INTERP),
-            4 => Ok(SegmentType::SHLIB),
-            5 => Ok(SegmentType::PHDR),
-            6 => Ok(SegmentType::TLS),
-            _ => Err(ElfError::InvalidProgramHeader(format!(
-                "Unknown segment type: {}",
-                value
-            ))),
+            0 => Ok(SegmentType::Null),
+            1 => Ok(SegmentType::Load),
+            2 => Ok(SegmentType::Dynamic),
+            3 => Ok(SegmentType::Interp),
+            4 => Ok(SegmentType::Shlib),
+            5 => Ok(SegmentType::Phdr),
+            6 => Ok(SegmentType::Tls),
+            _ => Err(ElfError::InvalidProgramHeader(
+                InvalidProgramHeader::InvalidSegmentType,
+            )),
         }
     }
 }
@@ -228,10 +304,9 @@ impl SegmentFlags {
         let unknown_flags = flags & !known_flags;
 
         if unknown_flags != 0 {
-            return Err(ElfError::InvalidProgramHeader(format!(
-                "Unknown segment flags: {:#x}",
-                unknown_flags
-            )));
+            return Err(ElfError::InvalidProgramHeader(
+                InvalidProgramHeader::UnknownSegmentFlags,
+            ));
         }
 
         Ok(Self { flags })
@@ -283,7 +358,7 @@ impl From<u32> for SegmentFlags {
     }
 }
 
-struct ProgramHeader {
+pub struct ProgramHeader {
     /// type of segment
     typ: SegmentType,
     /// segment-dependent flags
@@ -348,10 +423,9 @@ impl ProgramHeader {
         let p_align: u64 = u64::from_le_bytes(val64);
 
         if p_align != 0 && !p_align.is_power_of_two() {
-            return Err(ElfError::InvalidProgramHeader(format!(
-                "Incorrect p_align value: {}",
-                p_align
-            )));
+            return Err(ElfError::InvalidProgramHeader(
+                InvalidProgramHeader::InvalidAlignment,
+            ));
         }
 
         Ok(Self {
@@ -366,99 +440,78 @@ impl ProgramHeader {
         })
     }
 
-    // program header table is found at offset phoff and consists of phnum entries with size phentsize
-    fn parse_program_header_table(
-        raw: &[u8],
-        phnum: u16,
-        phentsize: u16,
-    ) -> Result<Vec<Self>, ElfError> {
-        let Some(table_size) = phentsize.checked_mul(phnum) else {
-            return Err(ElfError::InvalidProgramHeader(
-                "Program header size overflow".to_string(),
-            ));
-        };
-
-        if table_size as usize > raw.len() {
-            return Err(ElfError::InvalidProgramHeader(
-                "Program heaProgram header bigger than remaining data".to_string(),
-            ));
-        }
-
-        (0..phnum)
-            .map(|i| {
-                let start = (i as usize) * (phentsize as usize);
-                ProgramHeader::new(&raw[start..start + (phentsize as usize)])
-            })
-            .collect()
+    pub fn is_loadable(&self) -> bool {
+        self.typ == SegmentType::Load
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 #[repr(u32)]
 pub enum SectionHeaderType {
     /// Uused section header
-    NULL,
+    Null,
     /// Program data
-    PROGBITS,
+    Progbits,
     /// Symbol table
-    SYMTAB,
+    Symtab,
     /// String table
-    STRTAB,
+    Strtab,
     /// Relocation entries with addends
-    RELA,
+    Rela,
     /// Symbol hash table
-    SHT_HASH,
+    ShtHash,
     /// Dynamic linking information
-    DYNAMIC,
+    Dynamic,
     /// Notes
-    NOTE,
+    Note,
     /// Program space with no data (bss)
-    NOBITS,
+    Nobits,
     /// Relocation entries without addends
-    REL,
+    Rel,
     /// Reserved
-    SHLIB,
+    Shlib,
     /// Dynamic linking symbol table
-    DYNSYM,
+    Dynsym,
     /// Array of constructors
-    INIT_ARRAY,
+    InitArray,
     /// Array of destructors
-    FINI_ARRAY,
+    FiniArray,
     /// Array of pre-constructors
-    PREINIT_ARRAY,
+    PreinitArray,
     /// Section group
-    GROUP,
+    Group,
     /// Extended section indices
-    SYMTAB_SHNDX,
+    SymtabShndx,
+    GnuHash,
     /// Number of defined types
-    NUM,
+    Num,
 }
 
 impl TryFrom<u32> for SectionHeaderType {
     type Error = ElfError;
     fn try_from(value: u32) -> Result<Self, Self::Error> {
         match value {
-            0 => Ok(Self::NULL),
-            1 => Ok(Self::PROGBITS),
-            2 => Ok(Self::SYMTAB),
-            3 => Ok(Self::STRTAB),
-            4 => Ok(Self::RELA),
-            5 => Ok(Self::SHT_HASH),
-            6 => Ok(Self::DYNAMIC),
-            7 => Ok(Self::NOTE),
-            8 => Ok(Self::NOBITS),
-            9 => Ok(Self::REL),
-            10 => Ok(Self::SHLIB),
-            11 => Ok(Self::DYNSYM),
-            14 => Ok(Self::INIT_ARRAY),
-            15 => Ok(Self::FINI_ARRAY),
-            16 => Ok(Self::PREINIT_ARRAY),
-            17 => Ok(Self::GROUP),
-            18 => Ok(Self::SYMTAB_SHNDX),
-            _ => Err(ElfError::InvalidSectionHeader(format!(
-                "Unknown segment type: {}",
-                value
-            ))),
+            0 => Ok(Self::Null),
+            1 => Ok(Self::Progbits),
+            2 => Ok(Self::Symtab),
+            3 => Ok(Self::Strtab),
+            4 => Ok(Self::Rela),
+            5 => Ok(Self::ShtHash),
+            6 => Ok(Self::Dynamic),
+            7 => Ok(Self::Note),
+            8 => Ok(Self::Nobits),
+            9 => Ok(Self::Rel),
+            10 => Ok(Self::Shlib),
+            11 => Ok(Self::Dynsym),
+            14 => Ok(Self::InitArray),
+            15 => Ok(Self::FiniArray),
+            16 => Ok(Self::PreinitArray),
+            17 => Ok(Self::Group),
+            18 => Ok(Self::SymtabShndx),
+            0x6ffffff6 => Ok(Self::GnuHash),
+            _ => Err(ElfError::InvalidSectionHeader(
+                InvalidSectionHeader::InvalidHeaderType,
+            )),
         }
     }
 }
@@ -495,10 +548,9 @@ impl SectionFlags {
         let unknown_flags = flags & !known_flags;
 
         if unknown_flags != 0 {
-            return Err(ElfError::InvalidSectionHeader(format!(
-                "Unknown segment flags: {:#x}",
-                unknown_flags
-            )));
+            return Err(ElfError::InvalidSectionHeader(
+                InvalidSectionHeader::InvalidSectionFlags,
+            ));
         }
 
         Ok(Self { flags })
@@ -622,74 +674,249 @@ impl SectionHeader {
             entsize: sh_entsize,
         })
     }
+
+    pub fn contains_relocation_entries(&self) -> bool {
+        self.typ == SectionHeaderType::Rel || self.typ == SectionHeaderType::Rela
+    }
+}
+
+//  R_AMD64_RELATIVE => B + A
+// S: The value of the symbol referenced by the relocation. This is the final address of the symbol after linking and loading.
+
+// B: The base address at which the shared object is loaded into memory during execution. The virtual
+// address where the shared object will be loaded.
+
+// A: The addend used to compute the value of the relocatable field. This is the explicit addend stored in the relocation entry (for RELA relocations).
+
+#[derive(Debug)]
+#[repr(u32)]
+pub enum RelocationType {
+    Amd64None,
+    Amd6464,
+    Amd64Pc32,
+    Amd64Got32,
+    Amd64Plt32,
+    Amd64Copy,
+    Amd64GlobDat,
+    Amd64JumpSlot,
+    // B + A = virtual base + addend
+    Amd64Relative,
+    Amd64GotPcrel,
+    Amd64TlsGd,
+    Amd64TlsLd,
+    Amd64DtpOff32,
+    Amd64GotTpOff,
+    Amd64TpOff64,
+    Amd64Size32,
+    Amd64Size64,
+}
+
+impl TryFrom<u32> for RelocationType {
+    type Error = ElfError;
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(RelocationType::Amd64None),
+            1 => Ok(RelocationType::Amd6464),
+            2 => Ok(RelocationType::Amd64Pc32),
+            3 => Ok(RelocationType::Amd64Got32),
+            4 => Ok(RelocationType::Amd64Plt32),
+            5 => Ok(RelocationType::Amd64Copy),
+            6 => Ok(RelocationType::Amd64GlobDat),
+            7 => Ok(RelocationType::Amd64JumpSlot),
+            8 => Ok(RelocationType::Amd64Relative),
+            9 => Ok(RelocationType::Amd64GotPcrel),
+            10 => Ok(RelocationType::Amd64TlsGd),
+            11 => Ok(RelocationType::Amd64TlsLd),
+            12 => Ok(RelocationType::Amd64DtpOff32),
+            13 => Ok(RelocationType::Amd64GotTpOff),
+            14 => Ok(RelocationType::Amd64TpOff64),
+            15 => Ok(RelocationType::Amd64Size32),
+            16 => Ok(RelocationType::Amd64Size64),
+            _ => Err(ElfError::InvalidRelocationType(
+                InvalidRelocationType::InvalidType,
+            )),
+        }
+    }
+}
+
+// Rel = Relocation
+// Rela = Relocation with addend
+pub struct RelocationEntry {
+    pub rtype: RelocationType,
+    pub offset: u64,
+    pub symbol_tbl_idx: u32,
+    pub addend: Option<u64>,
+}
+
+impl RelocationEntry {
+    pub fn new(raw: &[u8]) -> Result<Self, ElfError> {
+        let mut val64 = [0u8; 8];
+
+        val64.copy_from_slice(&raw[0x0..0x8]);
+        let r_offset = u64::from_le_bytes(val64);
+
+        val64.copy_from_slice(&raw[0x8..0x10]);
+        let r_info = u64::from_le_bytes(val64);
+
+        Ok(RelocationEntry {
+            offset: r_offset,
+            rtype: RelocationType::try_from((r_info & 0xffffffff) as u32)?,
+            symbol_tbl_idx: (r_info >> 32) as u32,
+            addend: None,
+        })
+    }
+
+    pub fn new_rela(raw: &[u8]) -> Result<Self, ElfError> {
+        let mut val64 = [0u8; 8];
+
+        val64.copy_from_slice(&raw[0x0..0x8]);
+        let r_offset = u64::from_le_bytes(val64);
+
+        val64.copy_from_slice(&raw[0x8..0x10]);
+        let r_info = u64::from_le_bytes(val64);
+
+        val64.copy_from_slice(&raw[0x10..0x18]);
+        let r_addend = u64::from_le_bytes(val64);
+
+        Ok(RelocationEntry {
+            offset: r_offset,
+            rtype: RelocationType::try_from((r_info & 0xffffffff) as u32)?,
+            symbol_tbl_idx: (r_info >> 32) as u32,
+            addend: Some(r_addend),
+        })
+    }
+}
+
+impl Display for RelocationEntry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "RelocationEntry {{")?;
+        writeln!(f, "    relocation type:  {:?}", self.rtype)?;
+        writeln!(f, "    offset:     {:#016x}", self.offset)?;
+        writeln!(
+            f,
+            "    symbol table index:    {:#016x}",
+            self.symbol_tbl_idx
+        )?;
+        writeln!(f, "    addend:      {:?}", self.addend)?;
+        write!(f, "}}")
+    }
 }
 
 pub struct ElfBinary<'a> {
     raw: &'a [u8],
+    header: ElfHeader,
+}
+
+impl<'a> ElfBinary<'a> {
+    pub fn new(raw: &'a [u8]) -> Result<Self, ElfError> {
+        let header = ElfHeader::new(&raw).expect("Header parsing failed");
+
+        Ok(Self { raw, header })
+    }
+
+    pub fn section_headers(&self) -> Result<impl Iterator<Item = SectionHeader> + 'a, ElfError> {
+        self.header.section_headers(self.raw)
+    }
+
+    pub fn program_headers(&self) -> Result<impl Iterator<Item = ProgramHeader> + 'a, ElfError> {
+        self.header.program_headers(self.raw)
+    }
+
+    pub fn relocation_entries<'s>(
+        &'s self,
+    ) -> Result<impl Iterator<Item = RelocationEntry> + 's, ElfError> {
+        for sh in self
+            .section_headers()?
+            .filter(|sh| sh.contains_relocation_entries())
+        {
+            let entry_count = sh.size / sh.entsize;
+            for i in 0..entry_count {
+                let rel_raw = &self.raw[(sh.offset + i * sh.entsize) as usize..];
+                match sh.typ {
+                    SectionHeaderType::Rel => RelocationEntry::new(rel_raw)?,
+                    SectionHeaderType::Rela => RelocationEntry::new_rela(rel_raw)?,
+                    _ => unreachable!(),
+                };
+            }
+        }
+
+        Ok(self
+            .section_headers()?
+            .filter(|sh| sh.contains_relocation_entries())
+            .flat_map(move |sh| {
+                let entry_count = sh.size / sh.entsize;
+                (0..entry_count).map(move |i| {
+                    let rel_raw = &self.raw[(sh.offset + i * sh.entsize) as usize..];
+                    match sh.typ {
+                        SectionHeaderType::Rel => RelocationEntry::new(rel_raw).unwrap(),
+                        SectionHeaderType::Rela => RelocationEntry::new_rela(rel_raw).unwrap(),
+                        _ => unreachable!(),
+                    }
+                })
+            }))
+    }
 }
 
 #[cfg(test)]
 mod elf_tests {
     use super::*;
+    extern crate alloc;
     extern crate std;
+    use alloc::vec::Vec;
     use std::{fs, path::Path, println};
 
     // Better to keep test resources in a dedicated test directory
-    const TEST_FILE_PATH: &str = "src/elf_loader/test/test";
+    const TEST_FILE_PATH: &'static str = "src/elf_loader/test/test";
+    const TEST_KERNEL_PATH: &'static str = "src/elf_loader/test/kernel";
 
-    fn load_test_file() -> Vec<u8> {
-        let file_path = Path::new(env!("CARGO_MANIFEST_DIR")).join(TEST_FILE_PATH);
+    fn load_test_file(path: &'static str) -> Vec<u8> {
+        let file_path = Path::new(env!("CARGO_MANIFEST_DIR")).join(path);
         fs::read(file_path).expect("Failed to read test file")
     }
 
     #[test]
-    fn parse_header() {
-        let raw = load_test_file();
+    fn test_parse_header() {
+        let raw = load_test_file(TEST_FILE_PATH);
 
-        // Test both success and error cases
-        match ElfHeader::new(&raw) {
-            Ok(header) => {
-                println!("Parsed output: {}", header);
-            }
-            Err(e) => {
-                panic!("Failed to parse header: {:?}", e);
-            }
+        let eh = ElfHeader::new(&raw).expect("Header parsing failed");
+        println!("Parsed output: {}", eh);
+    }
+
+    #[test]
+    fn test_parse_program_headers() {
+        let raw = load_test_file(TEST_FILE_PATH);
+
+        let header = ElfHeader::new(&raw).expect("Header parsing failed");
+        for ph in header.program_headers(&raw).unwrap() {
+            println!("Parsed output: {}", ph);
         }
     }
 
     #[test]
-    fn parse_program_headers() {
-        let raw = load_test_file();
+    fn test_parse_section_headers() {
+        let raw = load_test_file(TEST_KERNEL_PATH);
 
         let header = ElfHeader::new(&raw).expect("Header parsing failed");
-        for i in 0..header.phnum as u64 {
-            match ProgramHeader::new(&raw[(header.phoff + i * header.phentsize as u64) as usize..])
-            {
-                Ok(program_header) => {
-                    println!("Parsed output: {}", program_header);
-                }
-                Err(e) => {
-                    panic!("Failed to parse program header: {:?}", e);
-                }
+        for sh in header.section_headers(&raw).unwrap() {
+            if sh.entsize > 0 {
+                assert_eq!(sh.size % sh.entsize, 0);
             }
+            println!("Parsed output: {}", sh);
         }
     }
 
     #[test]
-    fn parse_section_headers() {
-        let raw = load_test_file();
+    fn test_parse_relocation_entry() {
+        let raw = load_test_file(TEST_KERNEL_PATH);
 
-        let header = ElfHeader::new(&raw).expect("Header parsing failed");
-        for i in 0..header.shnum as u64 {
-            match SectionHeader::new(&raw[(header.shoff + i * header.shentsize as u64) as usize..])
-            {
-                Ok(section_header) => {
-                    println!("Parsed output: {}", section_header);
-                }
-                Err(e) => {
-                    panic!("Failed to parse program header: {:?}", e);
-                }
-            }
+        let elf = ElfBinary::new(&raw).unwrap();
+
+        let relocation_entries = elf
+            .relocation_entries()
+            .expect("Failed to parse relocation entries");
+
+        for e in relocation_entries {
+            println!("{}", e);
         }
     }
 }

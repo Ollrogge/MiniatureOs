@@ -1,10 +1,10 @@
+#![feature(iterator_try_collect)]
 #![no_std]
 
 pub mod elf_loader;
 #[cfg(feature = "kernel")]
 pub mod hashmap;
 pub mod intrusive_linked_list;
-pub mod math;
 pub mod mpsc_queue;
 pub mod mutex;
 #[cfg(feature = "kernel")]
