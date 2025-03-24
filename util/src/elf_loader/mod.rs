@@ -1,22 +1,21 @@
-pub mod elfbinary;
+pub mod elf;
 
-use core::{iter::Filter, slice::Iter};
-use elfbinary::{ElfBinary, ElfError, ProgramHeader, RelocationEntry};
-
-pub type LoadableSegments<'a> = Filter<Iter<'a, ProgramHeader>, fn(&&ProgramHeader) -> bool>;
+use elf::{ElfBinary, ElfError, ProgramHeader, RelocationEntry};
 
 pub trait ElfLoader {
-    // fn allocate(&self, program_headers: LoadableSegments<'_>);
-    fn allocate(&self, program_header: ProgramHeader);
-    fn relocate(&self, relocation: RelocationEntry);
-    fn tls(&self);
+    fn allocate(&mut self, program_header: ProgramHeader);
+    fn relocate(&mut self, relocation: RelocationEntry);
+    fn tls(&mut self);
 }
 
 impl<'a> ElfBinary<'a> {
-    pub fn load(&self, loader: &dyn ElfLoader) -> Result<(), ElfError> {
+    pub fn load(&self, loader: &mut dyn ElfLoader) -> Result<(), ElfError> {
         // Named functions in Rust have unique types that include their identity.
         // We must cast to fn(&&ProgramHeader) -> bool to match the trait's
         // expected function pointer type.
+        if self.program_headers()?.filter(|ph| ph.is_tls()).count() > 0 {
+            todo!("Implement support for tls");
+        }
 
         self.program_headers()?
             .filter(|p| p.is_loadable())

@@ -1,6 +1,9 @@
 use common::{println, BiosInfo};
 use core::{cmp, marker::PhantomData, mem, ops::Add, ptr, slice};
-use elfloader::{arch::x86_64::RelocationTypes, *};
+use util::elf_loader::{
+    elf::{ElfBinary, ElfError, ProgramHeader, RelocationEntry, RelocationType},
+    ElfLoader,
+};
 use x86_64::{
     memory::{
         Address, FrameAllocator, Page, PageRangeInclusive, PageSize, PhysicalAddress,
@@ -11,10 +14,6 @@ use x86_64::{
         Translator, TranslatorAllSizes,
     },
 };
-
-// TODO: move this functionality to a more general util crate since I will
-// need it to load elfs for the kernel as well
-// also TODO: remove dependency to elfloader
 
 pub struct KernelLoader<'a, M, A> {
     virtual_base: u64,
@@ -201,48 +200,114 @@ where
 {
     // we just need allocate and not load since we align down the addresses such
     // that accesses will still work.
-    fn allocate(&mut self, load_headers: LoadableHeaders) -> Result<(), ElfLoaderErr> {
-        for header in load_headers {
-            println!(
-                "Kernel elf: allocate segment at {:#x}, size = {:#x}, flags = {}",
-                header.virtual_addr() + self.virtual_base,
-                header.mem_size(),
-                header.flags()
-            );
+    fn allocate(&mut self, header: ProgramHeader) {
+        println!(
+            "Kernel elf: allocate segment at {:#x}, size = {:#x}, flags = {}",
+            header.virtual_addr() + self.virtual_base,
+            header.mem_size(),
+            header.flags()
+        );
 
-            let physical_start_address =
-                PhysicalAddress::new(self.info.kernel.start + header.offset());
-            let start_frame = PhysicalFrame::containing_address(physical_start_address);
-            let end_frame: PhysicalFrame = PhysicalFrame::containing_address(
+        let physical_start_address = PhysicalAddress::new(self.info.kernel.start + header.offset());
+        let start_frame = PhysicalFrame::containing_address(physical_start_address);
+        let end_frame: PhysicalFrame =
+            PhysicalFrame::containing_address(physical_start_address + header.file_size() - 1u64);
+
+        let virtual_start_address = VirtualAddress::new(self.virtual_base + header.virtual_addr());
+        let start_page = Page::containing_address(virtual_start_address);
+
+        let mut flags = PageTableEntryFlags::PRESENT;
+        if !header.flags().is_executable() {
+            flags |= PageTableEntryFlags::NO_EXECUTE;
+        }
+        if header.flags().is_writable() {
+            flags |= PageTableEntryFlags::WRITABLE;
+        }
+
+        // Map section into memory
+        for frame in PhysicalFrame::range_inclusive(start_frame, end_frame).iter() {
+            let frame_offset = frame - start_frame;
+            // 1:1 mapping
+            let page = start_page + frame_offset;
+
+            /*
+            println!(
+                "Map: {:x} -> {:x} {}",
+                frame.start(),
+                page.start(),
+                frame_offset
+            );
+            */
+
+            if page > self.max_page {
+                self.max_page = page;
+            }
+
+            self.page_table
+                .map_to(frame, page, flags, self.frame_allocator)
+                .expect("Failed to map section")
+                .ignore();
+        }
+        // .bss section handling
+        if header.mem_size() > header.file_size() {
+            // take header virtual address NOT page, since page is aligned downwards
+            let zero_start = virtual_start_address + header.file_size();
+            let zero_end = virtual_start_address + header.mem_size();
+
+            // Special case: last non-bss frame of the segment consists partly
+            // of data and partly of bss memory, which must be zeroed. Therefore we need
+            // to be careful to only zero part of the frame
+            let data_bytes_before_zero = zero_start.as_u64() & (Size4KiB::SIZE - 1usize) as u64;
+            /*
+            println!(
+                "Data bytes before zero: bytes_before_zero: {} header_mem_size: {} header_file_size: {}",
+                data_bytes_before_zero,
+                header.mem_size(),
+                header.file_size()
+            );
+            */
+            if data_bytes_before_zero != 0 {
+                let last_page = Page::<Size4KiB>::containing_address(
+                    virtual_start_address + header.file_size() - 1u64,
+                );
+
+                let last_frame = unsafe { self.make_mutable(last_page) };
+
+                unsafe {
+                    let ptr = (last_frame.start() as *mut u8).add(data_bytes_before_zero as usize);
+
+                    core::ptr::write_bytes(
+                        ptr,
+                        0x0,
+                        (Size4KiB::SIZE as u64 - data_bytes_before_zero) as usize,
+                    )
+                }
+            }
+
+            let start_page = Page::containing_address(zero_start.align_up(Size4KiB::SIZE));
+            let end_page = Page::containing_address(zero_end - 1u64);
+            /*
+            println!(
+                "Aligned: {:#x} {:#x} {:#x} {} {} {:#x} {:#x} {:#x}",
+                zero_start.as_u64(),
+                start_page.start(),
+                end_page.start(),
+                header.file_size(),
+                header.mem_size(),
+                end_frame.start(),
+                start_frame.start(),
                 physical_start_address + header.file_size() - 1u64,
             );
+            */
+            for page in Page::range_inclusive(start_page, end_page).iter() {
+                let frame = self
+                    .frame_allocator
+                    .allocate_frame()
+                    .expect("Failed to allocate frame for .bss");
 
-            let virtual_start_address =
-                VirtualAddress::new(self.virtual_base + header.virtual_addr());
-            let start_page = Page::containing_address(virtual_start_address);
-
-            let mut flags = PageTableEntryFlags::PRESENT;
-            if !header.flags().is_execute() {
-                flags |= PageTableEntryFlags::NO_EXECUTE;
-            }
-            if header.flags().is_write() {
-                flags |= PageTableEntryFlags::WRITABLE;
-            }
-
-            // Map section into memory
-            for frame in PhysicalFrame::range_inclusive(start_frame, end_frame).iter() {
-                let frame_offset = frame - start_frame;
-                // 1:1 mapping
-                let page = start_page + frame_offset;
-
-                /*
-                println!(
-                    "Map: {:x} -> {:x} {}",
-                    frame.start(),
-                    page.start(),
-                    frame_offset
-                );
-                */
+                unsafe {
+                    core::ptr::write_bytes(frame.start() as *mut u8, 0, frame.size() as usize);
+                }
 
                 if page > self.max_page {
                     self.max_page = page;
@@ -250,116 +315,20 @@ where
 
                 self.page_table
                     .map_to(frame, page, flags, self.frame_allocator)
-                    .expect("Failed to map section")
+                    .expect("Failed to map .bss section")
                     .ignore();
             }
-            // .bss section handling
-            if header.mem_size() > header.file_size() {
-                // take header virtual address NOT page, since page is aligned down
-                let zero_start = virtual_start_address + header.file_size();
-                let zero_end = virtual_start_address + header.mem_size();
-
-                // Special case: last non-bss frame of the segment consists partly
-                // of data and partly of bss memory, which must be zeroed. Therefore we need
-                // to be careful to only zero part of the frame
-                let data_bytes_before_zero = zero_start.as_u64() & (Size4KiB::SIZE - 1usize) as u64;
-                /*
-                println!(
-                    "Data bytes before zero: bytes_before_zero: {} header_mem_size: {} header_file_size: {}",
-                    data_bytes_before_zero,
-                    header.mem_size(),
-                    header.file_size()
-                );
-                */
-                if data_bytes_before_zero != 0 {
-                    let last_page = Page::<Size4KiB>::containing_address(
-                        virtual_start_address + header.file_size() - 1u64,
-                    );
-
-                    let last_frame = unsafe { self.make_mutable(last_page) };
-
-                    unsafe {
-                        let ptr =
-                            (last_frame.start() as *mut u8).add(data_bytes_before_zero as usize);
-
-                        core::ptr::write_bytes(
-                            ptr,
-                            0x0,
-                            (Size4KiB::SIZE as u64 - data_bytes_before_zero) as usize,
-                        )
-                    }
-                }
-
-                let start_page = Page::containing_address(zero_start.align_up(Size4KiB::SIZE));
-                let end_page = Page::containing_address(zero_end - 1u64);
-                /*
-                println!(
-                    "Aligned: {:#x} {:#x} {:#x} {} {} {:#x} {:#x} {:#x}",
-                    zero_start.as_u64(),
-                    start_page.start(),
-                    end_page.start(),
-                    header.file_size(),
-                    header.mem_size(),
-                    end_frame.start(),
-                    start_frame.start(),
-                    physical_start_address + header.file_size() - 1u64,
-                );
-                */
-                for page in Page::range_inclusive(start_page, end_page).iter() {
-                    let frame = self
-                        .frame_allocator
-                        .allocate_frame()
-                        .expect("Failed to allocate frame for .bss");
-
-                    unsafe {
-                        core::ptr::write_bytes(frame.start() as *mut u8, 0, frame.size() as usize);
-                    }
-
-                    if page > self.max_page {
-                        self.max_page = page;
-                    }
-
-                    self.page_table
-                        .map_to(frame, page, flags, self.frame_allocator)
-                        .expect("Failed to map .bss section")
-                        .ignore();
-                }
-            }
         }
-
-        Ok(())
     }
 
-    fn relocate(&mut self, entry: RelocationEntry) -> Result<(), ElfLoaderErr> {
+    fn relocate(&mut self, entry: RelocationEntry) {
         match entry.rtype {
-            RelocationType::x86_64(typ) => match typ {
-                RelocationTypes::R_AMD64_RELATIVE => {
-                    self.handle_relative_relocation(entry);
-                }
-                _ => panic!("Unhandled relocation type: {:?}", typ),
-            },
-            _ => panic!("Expected x86_64 relocation type but got x86 relocation type"),
+            RelocationType::Amd64Relative => {
+                self.handle_relative_relocation(entry);
+            }
+            _ => panic!("Unhandled relocation type: {:?}", entry.rtype),
         }
-        Ok(())
     }
 
-    fn load(&mut self, flags: Flags, base: VAddr, region: &[u8]) -> Result<(), ElfLoaderErr> {
-        //println!("Load called at {:#x}, flags = {}", base, flags);
-        Ok(())
-    }
-
-    fn tls(
-        &mut self,
-        tdata_start: VAddr,
-        _tdata_length: u64,
-        total_size: u64,
-        _align: u64,
-    ) -> Result<(), ElfLoaderErr> {
-        let tls_end = tdata_start + total_size;
-        println!(
-            "Initial TLS region is at = {:#x} -- {:#x}",
-            tdata_start, tls_end
-        );
-        Ok(())
-    }
+    fn tls(&mut self) {}
 }

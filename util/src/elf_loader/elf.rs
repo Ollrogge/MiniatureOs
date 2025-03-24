@@ -257,6 +257,10 @@ impl ElfHeader {
             SectionHeader::new(&raw[offset..]).unwrap()
         }))
     }
+
+    pub fn entry_point(&self) -> u64 {
+        self.entry
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -266,9 +270,16 @@ enum SegmentType {
     Load,
     Dynamic,
     Interp,
+    Note,
     Shlib,
     Phdr,
     Tls,
+    // GCC .eh_frame_hdr segment
+    GnuEhFrame,
+    // Indicates stack executability
+    GnuStack,
+    // Read-only after relocation
+    GnuRelro,
 }
 
 impl TryFrom<u32> for SegmentType {
@@ -279,9 +290,13 @@ impl TryFrom<u32> for SegmentType {
             1 => Ok(SegmentType::Load),
             2 => Ok(SegmentType::Dynamic),
             3 => Ok(SegmentType::Interp),
-            4 => Ok(SegmentType::Shlib),
-            5 => Ok(SegmentType::Phdr),
-            6 => Ok(SegmentType::Tls),
+            4 => Ok(SegmentType::Note),
+            5 => Ok(SegmentType::Shlib),
+            6 => Ok(SegmentType::Phdr),
+            7 => Ok(SegmentType::Tls),
+            0x6474e550 => Ok(SegmentType::GnuEhFrame),
+            0x6474e551 => Ok(SegmentType::GnuStack),
+            0x6474e552 => Ok(SegmentType::GnuRelro),
             _ => Err(ElfError::InvalidProgramHeader(
                 InvalidProgramHeader::InvalidSegmentType,
             )),
@@ -290,7 +305,7 @@ impl TryFrom<u32> for SegmentType {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct SegmentFlags {
+pub struct SegmentFlags {
     flags: u32,
 }
 
@@ -442,6 +457,30 @@ impl ProgramHeader {
 
     pub fn is_loadable(&self) -> bool {
         self.typ == SegmentType::Load
+    }
+
+    pub fn is_tls(&self) -> bool {
+        self.typ == SegmentType::Tls
+    }
+
+    pub fn virtual_addr(&self) -> u64 {
+        self.vaddr
+    }
+
+    pub fn mem_size(&self) -> u64 {
+        self.memsz
+    }
+
+    pub fn flags(&self) -> SegmentFlags {
+        self.flags
+    }
+
+    pub fn offset(&self) -> u64 {
+        self.offset
+    }
+
+    pub fn file_size(&self) -> u64 {
+        self.filesz
     }
 }
 
@@ -814,6 +853,10 @@ impl<'a> ElfBinary<'a> {
         Ok(Self { raw, header })
     }
 
+    pub fn entry_point(&self) -> u64 {
+        self.header.entry_point()
+    }
+
     pub fn section_headers(&self) -> Result<impl Iterator<Item = SectionHeader> + 'a, ElfError> {
         self.header.section_headers(self.raw)
     }
@@ -884,7 +927,7 @@ mod elf_tests {
 
     #[test]
     fn test_parse_program_headers() {
-        let raw = load_test_file(TEST_FILE_PATH);
+        let raw = load_test_file(TEST_KERNEL_PATH);
 
         let header = ElfHeader::new(&raw).expect("Header parsing failed");
         for ph in header.program_headers(&raw).unwrap() {

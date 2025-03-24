@@ -52,7 +52,7 @@ fn build_mbr() -> Result<PathBuf> {
     let status = command.status()?;
 
     if !status.success() {
-        return Err(anyhow!("failed to run install on mbr"));
+        return Err(anyhow!("failed to run cargo install for mbr"));
     }
 
     let elf_file = Path::new("../target/x86-mbr/mbr/mbr");
@@ -83,7 +83,7 @@ fn build_stage2() -> Result<PathBuf> {
     let status = command.status()?;
 
     if !status.success() {
-        return Err(anyhow!("failed to run install on mbr"));
+        return Err(anyhow!("failed to run cargo install for stage2"));
     }
 
     let elf_file = Path::new("../target/x86-stage2/stage2/stage2");
@@ -114,7 +114,7 @@ fn build_stage3() -> Result<PathBuf> {
     let status = command.status()?;
 
     if !status.success() {
-        return Err(anyhow!("failed to run install on mbr"));
+        return Err(anyhow!("failed to run cargo install for stage3"));
     }
 
     let elf_file = Path::new("../target/x86-stage3/stage3/stage3");
@@ -145,7 +145,7 @@ fn build_stage4() -> Result<PathBuf> {
     let status = command.status()?;
 
     if !status.success() {
-        return Err(anyhow!("failed to run install on mbr"));
+        return Err(anyhow!("failed to run cargo install for stage4"));
     }
 
     let elf_file = Path::new("../target/x86-stage4/stage4/stage4");
