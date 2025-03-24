@@ -21,17 +21,5 @@ Add the following to `.cargo/config.toml`:
   bindeps = true
 ```
 
-### Notes
-- This is a very early work in progress which mainly consists of only a bootloader at the moment.
-
 ### Features
 - [X] BIOS bootloader
-- [X] Heap allocator
-    - Bump / Linkedlist frame allocator
-    - Buddy heap allocator
-
-### Goals
-Following are the long-term goals of this project:
-- 0 external dependencies at some point
-- POSIX compatible
-- Support for x86_64 & aarch64 & riscv64
