@@ -6,13 +6,16 @@ fn main() {
     // TODO: this didn't work, therefore loop through dir and look at each
     // file individually
     //println!("cargo:rerun-if-changed=x86_64");
-    let src_dir = Path::new("x86_64/src");
+
+    let dep_dirs = vec![Path::new("x86_64/src"), Path::new("util/src")];
     // Recursively add `cargo:rerun-if-changed` for all files in the directory
-    assert!(src_dir.exists() && src_dir.is_dir());
-    for entry in walkdir::WalkDir::new(src_dir) {
-        let entry = entry.unwrap();
-        if entry.path().is_file() {
-            println!("cargo:rerun-if-changed={}", entry.path().display());
+    for dir in dep_dirs {
+        assert!(dir.exists() && dir.is_dir());
+        for entry in walkdir::WalkDir::new(dir) {
+            let entry = entry.unwrap();
+            if entry.path().is_file() {
+                println!("cargo:rerun-if-changed={}", entry.path().display());
+            }
         }
     }
 

@@ -114,7 +114,11 @@ impl PageTableEntry {
 
     /// Sets the physical address of either the next page table this entry points
     /// to or the physical address of the physical frame if last level
-    pub fn set_address(&mut self, addr: PhysicalAddress, flags: PageTableEntryFlags) {
+    pub fn set_address(&mut self, addr: PhysicalAddress) {
+        self.0 = addr.as_u64() | self.flags().bits();
+    }
+
+    pub fn set(&mut self, addr: PhysicalAddress, flags: PageTableEntryFlags) {
         self.0 = addr.as_u64() | flags.bits();
     }
 
@@ -123,7 +127,7 @@ impl PageTableEntry {
     }
 
     pub fn set_flags(&mut self, flags: PageTableEntryFlags) {
-        self.0 = flags.bits();
+        self.0 = self.address().as_u64() | flags.bits();
     }
 
     pub fn add_flags(&mut self, flags: PageTableEntryFlags) {
@@ -193,6 +197,8 @@ impl IndexMut<usize> for PageTable {
 pub enum MappingError {
     FrameAllocationFailed,
     PageAlreadyMapped,
+    PageTableNotMapped,
+    PageNotMapped,
 }
 
 #[derive(Debug)]
@@ -230,6 +236,12 @@ pub trait Mapper<S: PageSize> {
 
     fn unmap(&mut self, page: Page<S>)
         -> Result<(PhysicalFrame<S>, TlbFlusher<S>), UnmappingError>;
+
+    fn update_flags(
+        &mut self,
+        page: Page<S>,
+        cb: impl Fn(PageTableEntryFlags) -> PageTableEntryFlags,
+    ) -> Result<TlbFlusher<S>, MappingError>;
 }
 
 pub trait MapperAllSizes: Mapper<Size4KiB> + Mapper<Size2MiB> {}

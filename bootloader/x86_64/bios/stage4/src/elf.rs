@@ -205,7 +205,7 @@ where
             "Kernel elf: allocate segment at {:#x}, size = {:#x}, flags = {}",
             header.virtual_addr() + self.virtual_base,
             header.mem_size(),
-            header.flags()
+            header.flags(),
         );
 
         let physical_start_address = PhysicalAddress::new(self.info.kernel.start + header.offset());
@@ -254,9 +254,9 @@ where
             let zero_start = virtual_start_address + header.file_size();
             let zero_end = virtual_start_address + header.mem_size();
 
-            // Special case: last non-bss frame of the segment consists partly
-            // of data and partly of bss memory, which must be zeroed. Therefore we need
-            // to be careful to only zero part of the frame
+            // Special case: last non-bss frame of the segment may contain partly
+            // data and partly bss memory, which must be zeroed. Therefore we need
+            // to be careful to only zero the .bss part of the frame
             let data_bytes_before_zero = zero_start.as_u64() & (Size4KiB::SIZE - 1usize) as u64;
             /*
             println!(
@@ -305,6 +305,7 @@ where
                     .allocate_frame()
                     .expect("Failed to allocate frame for .bss");
 
+                // zero the .bss section
                 unsafe {
                     core::ptr::write_bytes(frame.start() as *mut u8, 0, frame.size() as usize);
                 }
@@ -327,6 +328,50 @@ where
                 self.handle_relative_relocation(entry);
             }
             _ => panic!("Unhandled relocation type: {:?}", entry.rtype),
+        }
+    }
+
+    fn apply_relro(&mut self, header: ProgramHeader) {
+        println!(
+            "Kernel elf: Relro, make segment read-only at {:#x}, size = {:#x}, file size = {:#x}",
+            header.virtual_addr() + self.virtual_base,
+            header.mem_size(),
+            header.file_size()
+        );
+
+        let physical_start_address = PhysicalAddress::new(self.info.kernel.start + header.offset());
+        let start_frame = PhysicalFrame::containing_address(physical_start_address);
+        let end_frame: PhysicalFrame =
+            PhysicalFrame::containing_address(physical_start_address + header.file_size() - 1u64);
+
+        let virtual_start_address = VirtualAddress::new(self.virtual_base + header.virtual_addr());
+        let start_page = Page::<Size4KiB>::containing_address(virtual_start_address);
+
+        for frame in PhysicalFrame::range_inclusive(start_frame, end_frame).iter() {
+            let frame_offset = frame - start_frame;
+            // 1:1 mapping
+            let page = start_page + frame_offset;
+
+            self.page_table
+                .update_flags(page, |old_flags| old_flags & !PageTableEntryFlags::WRITABLE)
+                .expect("Relro: updating flags failed")
+                .ignore();
+
+            // .bss section handling
+            if header.mem_size() > header.file_size() {
+                let zero_start = virtual_start_address + header.file_size();
+                let zero_end = virtual_start_address + header.mem_size();
+                let start_page =
+                    Page::<Size4KiB>::containing_address(zero_start.align_up(Size4KiB::SIZE));
+                let end_page = Page::containing_address(zero_end - 1u64);
+
+                for page in Page::range_inclusive(start_page, end_page).iter() {
+                    self.page_table
+                        .update_flags(page, |old_flags| old_flags & !PageTableEntryFlags::WRITABLE)
+                        .expect("Relro: updating flags failed")
+                        .ignore();
+                }
+            }
         }
     }
 

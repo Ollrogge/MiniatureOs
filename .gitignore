@@ -5,3 +5,6 @@ tags
 *.img
 .cargo/
 .vscode/
+**/*.o
+**/*.out
+**/kernel

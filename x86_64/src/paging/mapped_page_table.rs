@@ -53,7 +53,7 @@ impl<P: PageTableFrameMapping> PageTableWalker<P> {
     {
         let table = if pagetable_entry.is_unused() {
             let frame = allocator.allocate_frame()?;
-            pagetable_entry.set_address(frame.address(), flags);
+            pagetable_entry.set(frame.address(), flags);
 
             let virtual_address = self.page_table_frame_mapping.frame_to_virtual(frame);
 
@@ -136,8 +136,39 @@ impl<'a, P: PageTableFrameMapping> Mapper<Size4KiB> for MappedPageTable<'a, P> {
         if pte.is_present() {
             Err(MappingError::PageAlreadyMapped)
         } else {
-            pte.set_address(frame.address(), flags);
+            pte.set(frame.address(), flags);
             Ok(TlbFlusher::new(page))
+        }
+    }
+
+    fn update_flags(
+        &mut self,
+        page: Page<Size4KiB>,
+        cb: impl Fn(PageTableEntryFlags) -> PageTableEntryFlags,
+    ) -> Result<TlbFlusher<Size4KiB>, MappingError> {
+        let l4 = &mut self.pml4t;
+        let l3 = self
+            .walker
+            .get_pagetable(&mut l4[page.address.l4_index()])
+            .ok_or(MappingError::PageTableNotMapped)?;
+
+        let l2 = self
+            .walker
+            .get_pagetable(&mut l3[page.address.l3_index()])
+            .ok_or(MappingError::PageTableNotMapped)?;
+        let l1 = self
+            .walker
+            .get_pagetable(&mut l2[page.address.l2_index()])
+            .ok_or(MappingError::PageTableNotMapped)?;
+
+        let pte = &mut l1[page.address.l1_index()];
+
+        if pte.is_present() {
+            let new_flags = cb(pte.flags());
+            pte.set_flags(new_flags);
+            Ok(TlbFlusher::new(page))
+        } else {
+            Err(MappingError::PageNotMapped)
         }
     }
 
@@ -211,8 +242,35 @@ impl<'a, P: PageTableFrameMapping> Mapper<Size2MiB> for MappedPageTable<'a, P> {
         if pte.is_present() {
             Err(MappingError::PageAlreadyMapped)
         } else {
-            pte.set_address(frame.address(), flags | PageTableEntryFlags::HUGE_PAGE);
+            pte.set(frame.address(), flags | PageTableEntryFlags::HUGE_PAGE);
             Ok(TlbFlusher::new(page))
+        }
+    }
+
+    fn update_flags(
+        &mut self,
+        page: Page<Size2MiB>,
+        cb: impl Fn(PageTableEntryFlags) -> PageTableEntryFlags,
+    ) -> Result<TlbFlusher<Size2MiB>, MappingError> {
+        let l4 = &mut self.pml4t;
+        let l3 = self
+            .walker
+            .get_pagetable(&mut l4[page.address.l4_index()])
+            .ok_or(MappingError::PageTableNotMapped)?;
+
+        let l2 = self
+            .walker
+            .get_pagetable(&mut l3[page.address.l3_index()])
+            .ok_or(MappingError::PageTableNotMapped)?;
+
+        let pte = &mut l2[page.address.l2_index()];
+
+        if pte.is_present() {
+            let new_flags = cb(pte.flags());
+            pte.set_flags(new_flags);
+            Ok(TlbFlusher::new(page))
+        } else {
+            Err(MappingError::PageNotMapped)
         }
     }
 

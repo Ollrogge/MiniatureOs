@@ -2,18 +2,13 @@
 #![no_main]
 #![feature(naked_functions)]
 #![feature(const_mut_refs)]
-use alloc::string::String;
 use api::{BootInfo, PhysicalMemoryRegions};
 use core::{alloc::Layout, arch::asm, mem::size_of, panic::PanicInfo};
 use kernel::{
-    allocator::ALLOCATOR,
-    error::KernelError,
     housekeeping_threads::{spawn_finalizer_thread, spawn_idle_thread},
     kernel_init,
-    memory::manager::AllocationStrategy,
     multitasking::{
         process,
-        process::ThreadId,
         thread::{leave_thread, ThreadPriority},
     },
     print, println, serial_println,
@@ -25,8 +20,6 @@ use x86_64::{
 };
 
 extern crate alloc;
-use alloc::{boxed::Box, vec::Vec};
-use core::pin::Pin;
 
 #[panic_handler]
 pub fn panic(info: &PanicInfo) -> ! {

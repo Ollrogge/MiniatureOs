@@ -52,6 +52,14 @@ impl<'a, P: PageTableFrameMapping> Mapper<Size4KiB> for OffsetPageTable<'a, P> {
         self.inner.map_to(frame, page, flags, frame_allocator)
     }
 
+    fn update_flags(
+        &mut self,
+        page: Page<Size4KiB>,
+        cb: impl Fn(PageTableEntryFlags) -> PageTableEntryFlags,
+    ) -> Result<TlbFlusher<Size4KiB>, MappingError> {
+        self.inner.update_flags(page, cb)
+    }
+
     fn unmap(
         &mut self,
         page: Page<Size4KiB>,
@@ -72,6 +80,14 @@ impl<'a, P: PageTableFrameMapping> Mapper<Size2MiB> for OffsetPageTable<'a, P> {
         A: FrameAllocator<Size4KiB>,
     {
         self.inner.map_to(frame, page, flags, frame_allocator)
+    }
+
+    fn update_flags(
+        &mut self,
+        page: Page<Size2MiB>,
+        cb: impl Fn(PageTableEntryFlags) -> PageTableEntryFlags,
+    ) -> Result<TlbFlusher<Size2MiB>, MappingError> {
+        self.inner.update_flags(page, cb)
     }
 
     fn unmap(

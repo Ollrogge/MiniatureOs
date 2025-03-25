@@ -264,7 +264,6 @@ impl ElfHeader {
 }
 
 #[derive(Debug, PartialEq)]
-#[repr(u32)]
 enum SegmentType {
     Null,
     Load,
@@ -275,11 +274,11 @@ enum SegmentType {
     Phdr,
     Tls,
     // GCC .eh_frame_hdr segment
-    GnuEhFrame,
+    GnuEhFrame = 0x6474e550,
     // Indicates stack executability
-    GnuStack,
+    GnuStack = 0x6474e551,
     // Read-only after relocation
-    GnuRelro,
+    GnuRelro = 0x6474e552,
 }
 
 impl TryFrom<u32> for SegmentType {
@@ -481,6 +480,10 @@ impl ProgramHeader {
 
     pub fn file_size(&self) -> u64 {
         self.filesz
+    }
+
+    pub fn is_relro(&self) -> bool {
+        self.typ == SegmentType::GnuRelro
     }
 }
 
@@ -905,42 +908,28 @@ mod elf_tests {
     use super::*;
     extern crate alloc;
     extern crate std;
-    use alloc::vec::Vec;
     use std::{fs, path::Path, println};
 
-    // Better to keep test resources in a dedicated test directory
-    const TEST_FILE_PATH: &'static str = "src/elf_loader/test/test";
-    const TEST_KERNEL_PATH: &'static str = "src/elf_loader/test/kernel";
-
-    fn load_test_file(path: &'static str) -> Vec<u8> {
-        let file_path = Path::new(env!("CARGO_MANIFEST_DIR")).join(path);
-        fs::read(file_path).expect("Failed to read test file")
-    }
+    const TEST_KERNEL: &[u8] = include_bytes!("test/kernel");
 
     #[test]
     fn test_parse_header() {
-        let raw = load_test_file(TEST_FILE_PATH);
-
-        let eh = ElfHeader::new(&raw).expect("Header parsing failed");
+        let eh = ElfHeader::new(&TEST_KERNEL).expect("Header parsing failed");
         println!("Parsed output: {}", eh);
     }
 
     #[test]
     fn test_parse_program_headers() {
-        let raw = load_test_file(TEST_KERNEL_PATH);
-
-        let header = ElfHeader::new(&raw).expect("Header parsing failed");
-        for ph in header.program_headers(&raw).unwrap() {
+        let elf = ElfBinary::new(&TEST_KERNEL).unwrap();
+        for ph in elf.program_headers().unwrap() {
             println!("Parsed output: {}", ph);
         }
     }
 
     #[test]
     fn test_parse_section_headers() {
-        let raw = load_test_file(TEST_KERNEL_PATH);
-
-        let header = ElfHeader::new(&raw).expect("Header parsing failed");
-        for sh in header.section_headers(&raw).unwrap() {
+        let elf = ElfBinary::new(&TEST_KERNEL).unwrap();
+        for sh in elf.section_headers().unwrap() {
             if sh.entsize > 0 {
                 assert_eq!(sh.size % sh.entsize, 0);
             }
@@ -950,9 +939,7 @@ mod elf_tests {
 
     #[test]
     fn test_parse_relocation_entry() {
-        let raw = load_test_file(TEST_KERNEL_PATH);
-
-        let elf = ElfBinary::new(&raw).unwrap();
+        let elf = ElfBinary::new(&TEST_KERNEL).unwrap();
 
         let relocation_entries = elf
             .relocation_entries()

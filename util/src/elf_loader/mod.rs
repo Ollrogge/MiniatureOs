@@ -5,6 +5,7 @@ use elf::{ElfBinary, ElfError, ProgramHeader, RelocationEntry};
 pub trait ElfLoader {
     fn allocate(&mut self, program_header: ProgramHeader);
     fn relocate(&mut self, relocation: RelocationEntry);
+    fn apply_relro(&mut self, program_header: ProgramHeader);
     fn tls(&mut self);
 }
 
@@ -23,6 +24,10 @@ impl<'a> ElfBinary<'a> {
 
         self.relocation_entries()?
             .for_each(|rel| loader.relocate(rel));
+
+        self.program_headers()?
+            .filter(|ph| ph.is_relro())
+            .for_each(|ph| loader.apply_relro(ph));
 
         Ok(())
     }
